@@ -20,6 +20,36 @@ class FakeStore:
         self.config = config
 
 
+class FakeAttribute:
+    def __init__(self, value):
+        self.value = value
+
+
+class FakeAttributes:
+    def __init__(self):
+        self.store = {}
+
+    def itemByName(self, group, name):
+        return self.store.get((group, name))
+
+    def add(self, group, name, value):
+        attribute = FakeAttribute(value)
+        self.store[(group, name)] = attribute
+        return attribute
+
+
+class FakeComponent:
+    def __init__(self, token):
+        self.entityToken = token
+        self.attributes = FakeAttributes()
+        self.isReferencedComponent = False
+
+
+class FakeRoot:
+    def __init__(self):
+        self.attributes = FakeAttributes()
+
+
 class PaletteControllerTests(unittest.TestCase):
     def test_show_opens_a_new_palette_in_a_floating_window(self):
         palette = type('Palette', (), {'dockingState': None, 'isVisible': False})()
@@ -62,6 +92,28 @@ class PaletteControllerTests(unittest.TestCase):
         self.assertEqual('Acme', controller.rows[0].custom_values['manufacturer'])
         self.assertFalse(any(response['type'] == 'state' for response in responses))
         self.assertIn({'type': 'status', 'message': 'Saved.'}, responses)
+
+    def test_saving_a_cell_persists_the_value_on_the_design_root(self):
+        # The value must land on the active design's root (which is always saved
+        # with the design), not only on the component (which may live in another
+        # file and would be lost on close/reopen).
+        root = FakeRoot()
+        component = FakeComponent('token-a')
+        app = type('App', (), {'activeProduct': type('Product', (), {'rootComponent': root})()})()
+        controller = PaletteController(app)
+        controller.store = FakeStore(default_configuration())
+        controller.rows = [ConceptBomRow('row_1', 'Bracket', 1, custom_values={'manufacturer': ''})]
+        controller.components = {'row_1': component}
+        controller.send = lambda palette, payload: None
+
+        controller.receive(None, json.dumps({
+            'action': 'save_cell', 'row_id': 'row_1', 'field_id': 'manufacturer',
+            'value': 'Acme', 'view_id': 'purchasing_demo',
+        }))
+
+        from FusionConfigurableBOM.fusion import value_store
+        self.assertEqual({'manufacturer': 'Acme'},
+                         value_store.read_values(root, component, ['manufacturer']))
 
     def test_refresh_action_scans_the_design_and_sends_rows(self):
         root = object()

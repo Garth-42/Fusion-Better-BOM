@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fixed BOM cell values disappearing after closing and reopening a design: values are now stored in one map on the active design's root component (keyed by each part's persistent id) instead of on the individual components. Component-level values were not saved when a part was referenced from another file, so the active design's save never captured them. Existing values written on components are still read as a fallback.
 - Persisted BOM attribute and format edits automatically by debounce-saving the Fusion document a moment after editing stops, so values survive closing and reopening Fusion without a manual save.
 - Kept the Save design button for an immediate save and made saves best-effort on documents that have not been saved to a project yet.
 - Added a Copy Table button that copies the active view as tab-separated rows for clean pasting into Sheets/Excel.

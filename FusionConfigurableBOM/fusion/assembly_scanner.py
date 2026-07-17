@@ -1,5 +1,6 @@
 from ..domain.models import ConceptBomRow
-from .attribute_store import read_values
+from .attribute_store import read_values as read_component_values
+from .value_store import read_values as read_root_values
 
 def _is_leaf(occurrence):
     return occurrence.childOccurrences.count == 0
@@ -65,8 +66,12 @@ def scan_design(design, field_ids):
     rows = []
     for index, entry in enumerate(grouped.values(), 1):
         component = entry['component']
+        # Root-stored values are authoritative (they persist with the active
+        # design); fall back to any legacy value written on the component itself.
+        values = read_component_values(component, field_ids)
+        values.update(read_root_values(root, component, field_ids))
         rows.append(ConceptBomRow(f'row_{index}', component.name, entry['quantity'],
             getattr(component, 'partNumber', None), getattr(component, 'description', None),
             getattr(component, 'material', None).name if getattr(component, 'material', None) else None,
-            _is_linked(component), read_values(component, field_ids)))
+            _is_linked(component), values))
     return rows, {f'row_{i}': entry['component'] for i, entry in enumerate(grouped.values(), 1)}
