@@ -39,6 +39,14 @@
         <button id="saveAs" type="button">Save as…</button>
         <button id="delete" class="danger" type="button">Delete</button>
       </div>
+      <label class="control-label" for="editStructure">Structure</label>
+      <p class="section-description">Flat lists every unique part once. Hierarchical walks the assembly tree, showing sub-assemblies as collapsible parents with a rolled-up total quantity.</p>
+      <div class="format-actions">
+        <select id="editStructure" aria-label="BOM structure for this format">
+          <option value="flat">Flat — unique parts</option>
+          <option value="hierarchical">Hierarchical — assembly tree</option>
+        </select>
+      </div>
       <section class="editor-section">
         <div class="section-heading"><h3>Columns</h3><span>Use the arrows to reorder</span></div>
         <p class="section-description">Custom columns show the Fusion attribute key they sync with. Changing a custom column header also updates that attribute's display name and every existing column that uses it.</p>

@@ -17,6 +17,20 @@ def default_configuration():
         BomTableFormat('purchasing_demo', 'Purchasing Demo', [builtin('quantity','Qty',70), builtin('component_name','Component',220), attribute('manufacturer','Manufacturer'), attribute('manufacturer_part_number','Manufacturer Part Number'), attribute('supplier','Supplier'), attribute('supplier_part_number','Supplier Part Number')]),
         BomTableFormat('structured', 'Structured BOM', [builtin('quantity','Qty',70), builtin('total_quantity','Total Qty',80), builtin('component_name','Component',260), builtin('fusion_part_number','Part Number',160), builtin('fusion_description','Description',220)], 'hierarchical')])
 
+def _ensure_default_views(config):
+    # Add any built-in view the config is missing, matched by view_id, without
+    # touching the user's own views or their customizations. Default views are
+    # protected from deletion, so a design should always be able to reach every
+    # one -- including views added in a later release, like the hierarchical
+    # "Structured BOM". A design configured before such a view shipped never gains
+    # it otherwise: _migrate only bumps the schema version and never introduces
+    # new views, so the format simply would not appear in the picker.
+    existing = {view.view_id for view in config.views}
+    for view in default_configuration().views:
+        if view.view_id not in existing:
+            config.views.append(view)
+    return config
+
 def validate(config):
     if config.schema_version != SCHEMA_VERSION: raise ConfigurationError('Unsupported configuration schema version.')
     field_ids = [f.field_id for f in config.fields]
@@ -49,7 +63,8 @@ def new_id(prefix): return f'{prefix}_{uuid.uuid4().hex[:8]}'
 class FusionConfigurationStore:
     def load(self, root):
         attribute = root.attributes.itemByName(CONFIG_ATTRIBUTE_GROUP, CONFIG_ATTRIBUTE_NAME)
-        return default_configuration() if not attribute else loads(attribute.value)
+        config = default_configuration() if not attribute else loads(attribute.value)
+        return _ensure_default_views(config)
     def save(self, root, config):
         value = dumps(config)
         attribute = root.attributes.itemByName(CONFIG_ATTRIBUTE_GROUP, CONFIG_ATTRIBUTE_NAME)

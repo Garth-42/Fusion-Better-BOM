@@ -236,6 +236,7 @@ function renderEditor() {
     .map((item) => `<option value="${escape(item.view_id)}">${escape(item.name)}</option>`)
     .join('');
   $('editView').value = view.view_id;
+  $('editStructure').value = view.structure || 'flat';
   $('field').innerHTML = state.config.fields
     .map((field) => `<option value="${escape(field.field_id)}">${escape(field.default_label)}</option>`)
     .join('');
@@ -258,6 +259,7 @@ function renderEditor() {
 
 function collectEditorChanges() {
   const view = currentView();
+  view.structure = $('editStructure').value;
   document.querySelectorAll('.header').forEach((element) => {
     view.columns[element.dataset.index].header = element.value;
   });

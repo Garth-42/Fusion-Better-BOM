@@ -56,12 +56,15 @@ The add-in uses its **own palette** and never modifies Fusion's native BOM UI.
 2. Run **Utilities ▸ Add-Ins ▸ Open Configurable BOM** to show the palette.
 3. Click **Refresh** to scan the active design into the table.
 4. Use the **Format** dropdown to switch between saved layouts, including the
-   **Structured BOM** tree view.
+   **Structured BOM** tree view. The dropdown *is* the flat-vs-hierarchical
+   switch: each format is either flat or hierarchical, so picking a format
+   chooses the structure — there is no separate toggle.
 5. Click any cell marked with a ✎ to edit it. Edits save to the Fusion design
    automatically a moment after you stop typing; click **Save design** to save
    immediately.
-6. Click **Edit formats** to add fields, add/hide/reorder columns, rename
-   headers, or **Save as…** a new format.
+6. Click **Edit formats** to set a format's **Structure** (flat or
+   hierarchical), add fields, add/hide/reorder columns, rename headers, or
+   **Save as…** a new format.
 7. Click **Copy table** to copy the current view for pasting into a spreadsheet.
 
 ### Built-in formats
