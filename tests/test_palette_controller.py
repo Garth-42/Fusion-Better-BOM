@@ -1,4 +1,6 @@
 import json
+import sys
+import types
 import unittest
 from unittest.mock import patch
 
@@ -19,6 +21,27 @@ class FakeStore:
 
 
 class PaletteControllerTests(unittest.TestCase):
+    def test_show_opens_a_new_palette_in_a_floating_window(self):
+        palette = type('Palette', (), {'dockingState': None, 'isVisible': False})()
+        palettes = type('Palettes', (), {
+            'itemById': lambda self, palette_id: None,
+            'add': lambda self, *args: palette,
+        })()
+        app = type('App', (), {'userInterface': type('UserInterface', (), {'palettes': palettes})()})()
+        controller = PaletteController(app)
+        docking_states = type('PaletteDockingStates', (), {
+            'PaletteDockStateFloating': 'floating',
+        })
+        adsk = types.ModuleType('adsk')
+        adsk.core = types.SimpleNamespace(PaletteDockingStates=docking_states)
+
+        with patch.dict(sys.modules, {'adsk': adsk, 'adsk.core': adsk.core}):
+            result = controller.show()
+
+        self.assertIs(palette, result)
+        self.assertEqual('floating', palette.dockingState)
+        self.assertTrue(palette.isVisible)
+
     def test_saving_a_cell_updates_cached_table_without_rescanning(self):
         root = object()
         app = type('App', (), {'activeProduct': type('Product', (), {'rootComponent': root})()})()
