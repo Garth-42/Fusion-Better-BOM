@@ -35,13 +35,18 @@ class PaletteController:
             palette = None
         if not palette:
             path = os.path.join(os.path.dirname(__file__), 'web', 'index.html')
-            # Build the palette hidden, float it, then reveal it last (below).
-            # Creating the window on demand -- when the user first opens the BOM --
-            # rather than eagerly at add-in load is what makes its first appearance
-            # a fresh floating window that stacks above the Browser and object tree.
-            # A palette created at load parks behind those panels, and because the
-            # API exposes no raise/z-order call, no later show/hide lifts it out.
-            palette = ui.palettes.add(PALETTE_ID, 'Configurable BOM', 'file:///' + path.replace('\\', '/'), False, True, True, 900, 600, True)
+            # Create the palette on demand -- the first time the user opens the BOM
+            # -- rather than eagerly at add-in load. That is what makes its first
+            # appearance a fresh floating window stacked above the Browser and
+            # object tree; a palette built at load parks behind those panels, and
+            # the API exposes no raise/z-order call to lift it back out.
+            #
+            # Create it visible (not hidden-then-shown) and with Fusion's default
+            # web browser: some Fusion builds defer rendering a palette created
+            # hidden, so showing it a moment later paints blank, and forcing the
+            # newer browser can leave the HTML unrendered. Both must match the
+            # original working call so the toolbar and table draw on first open.
+            palette = ui.palettes.add(PALETTE_ID, 'Configurable BOM', 'file:///' + path.replace('\\', '/'), True, True, True, 900, 600)
             palette.dockingState = adsk.core.PaletteDockingStates.PaletteDockStateFloating
             if self._on_palette_created:
                 self._on_palette_created(palette)
