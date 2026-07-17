@@ -2,6 +2,7 @@
 
 const state = { config: null, table: null };
 const $ = (id) => document.getElementById(id);
+let copyFeedbackTimer;
 
 function send(message) {
   if (state.table && !message.view_id) message.view_id = state.table.view_id;
@@ -94,8 +95,11 @@ function legacyCopy(text) {
   textarea.value = text;
   textarea.setAttribute('readonly', '');
   textarea.style.position = 'fixed';
+  textarea.style.top = '0';
+  textarea.style.left = '0';
   textarea.style.opacity = '0';
   document.body.appendChild(textarea);
+  textarea.focus();
   textarea.select();
   let copied = false;
   try {
@@ -107,13 +111,26 @@ function legacyCopy(text) {
   return copied;
 }
 
+function showCopyFeedback(copied, count) {
+  const button = $('copy');
+  clearTimeout(copyFeedbackTimer);
+  button.classList.remove('copied', 'copy-failed');
+  button.classList.add(copied ? 'copied' : 'copy-failed');
+  button.textContent = copied ? 'Copied ✓' : 'Copy failed';
+  copyFeedbackTimer = setTimeout(() => {
+    button.classList.remove('copied', 'copy-failed');
+    button.textContent = 'Copy table';
+  }, 1800);
+  if (copied) status(`Copied ${count} row${count === 1 ? '' : 's'}. Paste into your spreadsheet.`);
+}
+
 async function copyTable() {
   if (!state.table || state.table.rows.length === 0) {
     return status('Nothing to copy yet — click Refresh to scan the assembly.', true);
   }
   const tsv = tableToTsv();
   const count = state.table.rows.length;
-  const confirm = () => status(`Copied ${count} row${count === 1 ? '' : 's'}. Paste into your spreadsheet.`);
+  const confirm = () => showCopyFeedback(true, count);
   try {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       await navigator.clipboard.writeText(tsv);
@@ -122,7 +139,9 @@ async function copyTable() {
   } catch (error) {
     // Clipboard API blocked in this palette context; fall through to the fallback.
   }
-  return legacyCopy(tsv) ? confirm() : status('Unable to access the clipboard.', true);
+  if (legacyCopy(tsv)) return confirm();
+  showCopyFeedback(false);
+  return status('Unable to access the clipboard. Select and copy the table manually.', true);
 }
 
 function currentView() {
@@ -136,7 +155,6 @@ function renderEditor() {
     .map((item) => `<option value="${escape(item.view_id)}">${escape(item.name)}</option>`)
     .join('');
   $('editView').value = view.view_id;
-  $('viewName').value = view.name;
   $('field').innerHTML = state.config.fields
     .map((field) => `<option value="${escape(field.field_id)}">${escape(field.default_label)}</option>`)
     .join('');
@@ -144,20 +162,25 @@ function renderEditor() {
     <div class="column">
       <input class="header" data-index="${index}" value="${escape(column.header)}">
       <label><input class="visible" data-index="${index}" type="checkbox" ${column.visible ? 'checked' : ''}> Visible</label>
-      <button type="button" data-move="${index},-1">←</button>
-      <button type="button" data-move="${index},1">→</button>
+      <div class="column-actions" aria-label="Reorder column">
+        <button type="button" data-move="${index},-1" aria-label="Move ${escape(column.header)} up" title="Move up" ${index === 0 ? 'disabled' : ''}>↑</button>
+        <button type="button" data-move="${index},1" aria-label="Move ${escape(column.header)} down" title="Move down" ${index === view.columns.length - 1 ? 'disabled' : ''}>↓</button>
+      </div>
     </div>`).join('');
 }
 
-function saveConfig() {
+function collectEditorChanges() {
   const view = currentView();
-  view.name = $('viewName').value.trim() || view.name;
   document.querySelectorAll('.header').forEach((element) => {
     view.columns[element.dataset.index].header = element.value;
   });
   document.querySelectorAll('.visible').forEach((element) => {
     view.columns[element.dataset.index].visible = element.checked;
   });
+}
+
+function saveConfig() {
+  collectEditorChanges();
   send({ action: 'save_config', config: state.config });
 }
 
@@ -170,10 +193,17 @@ $('view').onchange = (event) => {
   render();
 };
 $('edit').onclick = () => $('editor').showModal();
-$('close').onclick = () => $('editor').close();
 $('editView').onchange = renderEditor;
 $('saveConfig').onclick = saveConfig;
-$('duplicate').onclick = () => send({ action: 'duplicate_view', view_id: currentView().view_id, name: `${currentView().name} Copy` });
+$('saveAs').onclick = () => {
+  const source = currentView();
+  const name = prompt('Name for the new table format', `${source.name} Copy`);
+  if (name === null) return;
+  const trimmedName = name.trim();
+  if (!trimmedName) return status('Enter a name to save a new table format.', true);
+  collectEditorChanges();
+  send({ action: 'save_as_view', config: state.config, view_id: source.view_id, name: trimmedName });
+};
 $('delete').onclick = () => send({ action: 'delete_view', view_id: currentView().view_id });
 $('addColumn').onclick = () => send({ action: 'add_column', view_id: currentView().view_id, field_id: $('field').value });
 $('addField').onclick = () => {
