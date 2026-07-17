@@ -40,12 +40,18 @@ def _component_key(component):
     token = getattr(component, 'entityToken', None)
     return ('entity_token', token) if token else ('object_id', id(component))
 
-def _flat_occurrences(root):
+def _flat_occurrences(root, include_parent=False):
     """Return visible occurrences with their immediate parent context.
 
-    `allOccurrences` does not retain the parent relationship needed for the
-    subassembly roll-up, so use the occurrence tree for every flat mode.
+    Most flat scans use Fusion's `allOccurrences`, which is the established and
+    most reliable API traversal for a flattened BOM. Only the subassembly
+    roll-up needs parent context, so only that mode walks `occurrences`.
     """
+    if not include_parent:
+        found = [(occurrence, None) for occurrence in _visible(getattr(root, 'allOccurrences', None))]
+        if found:
+            return found
+        return [(occurrence, None) for occurrence in _visible(_root_descendants(root))]
     found = []
     def walk(occurrences, parent_component=None):
         for occurrence in _visible(occurrences):
@@ -54,8 +60,6 @@ def _flat_occurrences(root):
     walk(getattr(root, 'occurrences', None))
     if not found:
         found = [(occurrence, None) for occurrence in _visible(_root_descendants(root))]
-    if not found:
-        found = [(occurrence, None) for occurrence in _visible(getattr(root, 'allOccurrences', None))]
     return found
 
 def _rollup_key(component, parent_component, values, rollup_by):
@@ -76,7 +80,7 @@ def _rollup_key(component, parent_component, values, rollup_by):
 def scan_design(design, field_ids, rollup_by='component'):
     grouped = {}
     root = design.rootComponent
-    occurrence_contexts = _flat_occurrences(root)
+    occurrence_contexts = _flat_occurrences(root, rollup_by == 'subassembly')
     occurrences = [occurrence for occurrence, _parent in occurrence_contexts]
     # A strict leaf scan is the normal BOM behavior. Some Fusion designs use
     # components that contain both bodies and child occurrences, which means

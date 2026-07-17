@@ -32,6 +32,16 @@ def _ensure_default_views(config):
     for view in default_configuration().views:
         if view.view_id not in existing:
             config.views.append(view)
+    # A few early configurations stored the default General BOM with no
+    # columns. It is not a usable table format, so restore the shipped preset
+    # while leaving any non-empty user layout untouched.
+    general = next((view for view in config.views if view.view_id == 'general'), None)
+    if general is not None and not general.columns:
+        default_general = next(view for view in default_configuration().views if view.view_id == 'general')
+        general.name = default_general.name
+        general.columns = default_general.columns
+        general.structure = default_general.structure
+        general.rollup_by = default_general.rollup_by
     return config
 
 def validate(config):

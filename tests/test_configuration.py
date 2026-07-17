@@ -46,6 +46,11 @@ class ConfigurationTests(unittest.TestCase):
   _ensure_default_views(config)
   self.assertEqual('My General',next(v.name for v in config.views if v.view_id=='general'))
   self.assertEqual(5,len(config.views))
+ def test_ensure_default_views_restores_columns_for_an_empty_general_view(self):
+  config=loads('{"schema_version":3,"fields":[],"views":[{"view_id":"general","name":"General BOM","columns":[]}]}')
+  _ensure_default_views(config)
+  general=next(view for view in config.views if view.view_id=='general')
+  self.assertEqual(['quantity','component_name','fusion_part_number','fusion_description'],[column.source_id for column in general.columns])
  def test_store_load_adds_the_structured_view_to_a_legacy_design(self):
   # End to end through the store: a legacy v1 design (no Structured BOM) migrates
   # to v2 and gains the hierarchical format so it appears in the format picker.

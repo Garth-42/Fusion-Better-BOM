@@ -325,6 +325,8 @@ class PaletteControllerTests(unittest.TestCase):
         self.assertEqual(['General BOM', 'Assembly summary'], [view.name for view in views])
         self.assertEqual('Count', views[1].columns[0].header)
         self.assertNotEqual(views[0].view_id, views[1].view_id)
+        state = next(response for response in responses if response['type'] == 'state')
+        self.assertEqual(views[1].view_id, state['table']['view_id'])
         self.assertTrue(any(response['type'] == 'status' and response['message'] == 'Saved.'
                             for response in responses))
 

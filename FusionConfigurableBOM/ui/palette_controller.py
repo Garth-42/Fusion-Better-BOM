@@ -81,6 +81,7 @@ class PaletteController:
     def receive(self, palette, raw):
         try:
             message = json.loads(raw); action = message['action']
+            active_view_id = message.get('view_id')
             if action == 'refresh': return self.refresh(palette, message.get('view_id'))
             if action == 'save_design': return self._save_design(palette, auto=bool(message.get('auto')))
             if action == 'copy_table':
@@ -113,7 +114,12 @@ class PaletteController:
             elif action == 'save_as_view':
                 self._apply_config(config, message['config'], message.get('renamed_fields', []))
                 source = next(v for v in config.views if v.view_id == message['view_id'])
-                config.views.append(BomTableFormat(new_id('view'), message['name'], list(source.columns), source.structure, source.rollup_by))
+                saved_view = BomTableFormat(new_id('view'), message['name'], list(source.columns), source.structure, source.rollup_by)
+                config.views.append(saved_view)
+                # Select the newly created format in the palette. Previously it
+                # was saved but the response re-rendered the source view, making
+                # Save as appear to have done nothing.
+                active_view_id = saved_view.view_id
                 self.store.save(design.rootComponent, config)
             elif action == 'new_field':
                 field_id = message['field_id']; config.fields.append(CustomFieldDefinition(field_id, message['label']))
@@ -133,8 +139,8 @@ class PaletteController:
             # state redraw for every keystroke would replace that element, steal
             # focus, and prevent the remaining value from being saved.
             if action != 'save_cell':
-                self._resync_rows_structure(design, config, message.get('view_id'))
-                self._send_state(palette, config, message.get('view_id'))
+                self._resync_rows_structure(design, config, active_view_id)
+                self._send_state(palette, config, active_view_id)
             self.send(palette, {'type':'status','message':'Saved.'})
         except Exception as exc: self.send(palette, {'type':'error','message':str(exc)})
     def _save_design(self, palette, auto=False):
