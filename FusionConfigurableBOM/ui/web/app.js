@@ -69,6 +69,62 @@ function escape(value) {
   }[character]));
 }
 
+// Spreadsheets split a pasted cell on tabs/newlines, so any value containing
+// them must be quoted (with embedded quotes doubled) exactly like a TSV field.
+function tsvCell(value) {
+  const text = String(value ?? '');
+  return /[\t\r\n"]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+// Serialize exactly what the current view shows — visible columns and their
+// raw values — as tab-separated rows that paste straight into Sheets/Excel.
+function tableToTsv() {
+  const columns = state.table.columns;
+  const lines = [columns.map((column) => column.header)];
+  state.table.rows.forEach((row) => {
+    lines.push(columns.map((column) => row.values[column.source_id] ?? ''));
+  });
+  return lines.map((cells) => cells.map(tsvCell).join('\t')).join('\r\n');
+}
+
+// Fusion's palette does not always grant the async Clipboard API, so keep a
+// textarea + execCommand fallback for the copy button.
+function legacyCopy(text) {
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  let copied = false;
+  try {
+    copied = document.execCommand('copy');
+  } catch (error) {
+    copied = false;
+  }
+  document.body.removeChild(textarea);
+  return copied;
+}
+
+async function copyTable() {
+  if (!state.table || state.table.rows.length === 0) {
+    return status('Nothing to copy yet — click Refresh to scan the assembly.', true);
+  }
+  const tsv = tableToTsv();
+  const count = state.table.rows.length;
+  const confirm = () => status(`Copied ${count} row${count === 1 ? '' : 's'}. Paste into your spreadsheet.`);
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(tsv);
+      return confirm();
+    }
+  } catch (error) {
+    // Clipboard API blocked in this palette context; fall through to the fallback.
+  }
+  return legacyCopy(tsv) ? confirm() : status('Unable to access the clipboard.', true);
+}
+
 function currentView() {
   return state.config.views.find((view) => view.view_id === $('editView').value) || state.config.views[0];
 }
@@ -106,6 +162,7 @@ function saveConfig() {
 }
 
 $('refresh').onclick = () => { status('Scanning assembly…'); send({ action: 'refresh' }); };
+$('copy').onclick = copyTable;
 $('view').onchange = (event) => {
   const view = state.config.views.find((item) => item.view_id === event.target.value);
   state.table.columns = view.columns.filter((column) => column.visible);
