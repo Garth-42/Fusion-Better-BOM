@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <select id="view" aria-label="BOM table format"></select>
+    <button id="refresh" type="button">Refresh</button>
+    <button id="edit" type="button">Edit Table Formats</button>
+  </header>
+  <p id="status" role="status">Ready. Click Refresh to scan the active design.</p>
+  <main>
+    <p id="empty" hidden>No leaf component occurrences were found in this assembly.</p>
+    <table><thead id="thead"></thead><tbody id="tbody"></tbody></table>
+  </main>
+  <dialog id="editor">
+    <h2>Table formats</h2>
+    <label>Format <select id="editView"></select></label>
+    <button id="duplicate" type="button">Duplicate</button>
+    <button id="delete" type="button">Delete</button>
+    <label>Name <input id="viewName"></label>
+    <section id="columns"></section>
+    <label>Add existing field <select id="field"></select></label>
+    <button id="addColumn" type="button">Add field</button>
+    <button id="addField" type="button">Create custom field</button>
+    <button id="saveConfig" type="button">Save format changes</button>
+    <button id="close" type="button">Close</button>
+  </dialog>
+  <script src="app.js"></script>
+</body>
+</html>
