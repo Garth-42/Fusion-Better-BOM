@@ -2,7 +2,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from FusionConfigurableBOM.domain.models import ConceptBomRow
+from FusionConfigurableBOM.domain.models import ConceptBomRow, configuration_to_dict
 from FusionConfigurableBOM.persistence.configuration_store import default_configuration
 from FusionConfigurableBOM.ui.palette_controller import PaletteController
 
@@ -103,3 +103,30 @@ class PaletteControllerTests(unittest.TestCase):
 
         copy_text.assert_called_once_with('Qty\tPart\r\n1\tBracket')
         self.assertEqual({'type': 'copy_result', 'copied': True, 'row_count': 1}, responses[0])
+
+    def test_renaming_a_custom_attribute_migrates_cached_component_values(self):
+        root = object()
+        app = type('App', (), {'activeProduct': type('Product', (), {'rootComponent': root})()})()
+        controller = PaletteController(app)
+        controller.store = FakeStore(default_configuration())
+        component = object()
+        controller.rows = [ConceptBomRow('row_1', 'Bracket', 1, custom_values={'manufacturer': 'Acme'})]
+        controller.components = {'row_1': component}
+        controller.send = lambda palette, payload: None
+        raw_config = configuration_to_dict(controller.store.config)
+        for field in raw_config['fields']:
+            if field['field_id'] == 'manufacturer': field['field_id'] = 'maker'
+        for view in raw_config['views']:
+            for column in view['columns']:
+                if column['source_type'] == 'attribute' and column['source_id'] == 'manufacturer':
+                    column['source_id'] = 'maker'
+
+        with patch('FusionConfigurableBOM.ui.palette_controller.rename_value') as rename_value:
+            controller.receive(None, json.dumps({
+                'action': 'save_config', 'config': raw_config,
+                'renamed_fields': [{'old_id': 'manufacturer', 'new_id': 'maker'}],
+            }))
+
+        rename_value.assert_called_once_with(component, 'manufacturer', 'maker')
+        self.assertEqual({'maker': 'Acme'}, controller.rows[0].custom_values)
+        self.assertIn('maker', [field.field_id for field in controller.store.config.fields])

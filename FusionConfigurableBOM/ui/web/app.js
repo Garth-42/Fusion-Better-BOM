@@ -1,6 +1,6 @@
 /* global adsk */
 
-const state = { config: null, table: null };
+const state = { config: null, table: null, sort: null };
 const $ = (id) => document.getElementById(id);
 let copyFeedbackTimer;
 
@@ -48,15 +48,42 @@ function render() {
   viewSelect.value = state.table.view_id;
 
   $('thead').innerHTML = `<tr>${state.table.columns
-    .map((column) => `<th>${escape(column.header)}</th>`)
+    .map((column) => columnHeader(column))
     .join('')}</tr>`;
-  $('tbody').innerHTML = state.table.rows
+  const rows = sortedRows();
+  $('tbody').innerHTML = rows
     .map((row) => `<tr>${state.table.columns.map((column) => cell(row, column)).join('')}</tr>`)
     .join('');
 
   $('empty').hidden = state.table.rows.length !== 0;
+  $('tableHint').hidden = !state.table.rows.some((row) => rowHasEditableColumn(row));
   renderEditor();
   status(`Showing ${state.table.rows.length} unique component${state.table.rows.length === 1 ? '' : 's'}.`);
+}
+
+function columnHeader(column) {
+  const isSorted = state.sort && state.sort.sourceId === column.source_id;
+  const active = (direction) => isSorted && state.sort.direction === direction ? ' active' : '';
+  return `<th><span class="column-heading"><span>${escape(column.header)}</span><span class="sort-actions" aria-label="Sort ${escape(column.header)}"><button class="sort-button${active('ascending')}" type="button" data-sort="${escape(column.source_id)},ascending" aria-label="Sort ${escape(column.header)} ascending" title="Sort ascending">▲</button><button class="sort-button${active('descending')}" type="button" data-sort="${escape(column.source_id)},descending" aria-label="Sort ${escape(column.header)} descending" title="Sort descending">▼</button></span></span></th>`;
+}
+
+function sortedRows() {
+  const rows = [...state.table.rows];
+  if (!state.sort) return rows;
+  const { sourceId, direction } = state.sort;
+  const multiplier = direction === 'ascending' ? 1 : -1;
+  return rows.sort((left, right) => compareValues(left.values[sourceId], right.values[sourceId]) * multiplier);
+}
+
+function compareValues(left, right) {
+  const leftText = String(left ?? '');
+  const rightText = String(right ?? '');
+  const leftNumber = Number(leftText);
+  const rightNumber = Number(rightText);
+  if (leftText !== '' && rightText !== '' && Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
+    return leftNumber - rightNumber;
+  }
+  return leftText.localeCompare(rightText, undefined, { numeric: true, sensitivity: 'base' });
 }
 
 function cell(row, column) {
@@ -65,7 +92,11 @@ function cell(row, column) {
   if (row.linked) {
     return `<td><span title="Linked - open source design to edit">${escape(value)} 🔒</span></td>`;
   }
-  return `<td><input data-row="${escape(row.row_id)}" data-field="${escape(column.source_id)}" value="${escape(value)}"></td>`;
+  return `<td class="editable-cell" title="Editable cell"><input data-row="${escape(row.row_id)}" data-field="${escape(column.source_id)}" aria-label="${escape(column.header)} for ${escape(row.values.component_name ?? 'component')} (editable)" value="${escape(value)}"><span class="edit-marker" aria-hidden="true">✎</span></td>`;
+}
+
+function rowHasEditableColumn(row) {
+  return !row.linked && state.table.columns.some((column) => column.source_type === 'attribute');
 }
 
 function escape(value) {
@@ -86,7 +117,7 @@ function tsvCell(value) {
 function tableToTsv() {
   const columns = state.table.columns;
   const lines = [columns.map((column) => column.header)];
-  state.table.rows.forEach((row) => {
+  sortedRows().forEach((row) => {
     lines.push(columns.map((column) => row.values[column.source_id] ?? ''));
   });
   return lines.map((cells) => cells.map(tsvCell).join('\t')).join('\r\n');
@@ -137,6 +168,11 @@ function renderEditor() {
         <button type="button" data-move="${index},1" aria-label="Move ${escape(column.header)} down" title="Move down" ${index === view.columns.length - 1 ? 'disabled' : ''}>↓</button>
       </div>
     </div>`).join('');
+  $('attributes').innerHTML = state.config.fields.map((field) => `
+    <div class="attribute-definition">
+      <label>Attribute key<input class="field-id" data-original-id="${escape(field.field_id)}" value="${escape(field.field_id)}" aria-label="Attribute key for ${escape(field.default_label)}"></label>
+      <label>Display name<input class="field-label" data-field-id="${escape(field.field_id)}" value="${escape(field.default_label)}" aria-label="Display name for ${escape(field.field_id)}"></label>
+    </div>`).join('') || '<p class="empty-fields">No custom attributes have been added.</p>';
 }
 
 function collectEditorChanges() {
@@ -147,15 +183,41 @@ function collectEditorChanges() {
   document.querySelectorAll('.visible').forEach((element) => {
     view.columns[element.dataset.index].visible = element.checked;
   });
+  const renamedFields = [];
+  const fieldsByOriginalId = new Map(state.config.fields.map((field) => [field.field_id, field]));
+  document.querySelectorAll('.field-id').forEach((element) => {
+    const field = fieldsByOriginalId.get(element.dataset.originalId);
+    const fieldId = element.value.trim();
+    if (fieldId !== field.field_id) renamedFields.push({ old_id: field.field_id, new_id: fieldId });
+    field.field_id = fieldId;
+  });
+  document.querySelectorAll('.field-label').forEach((element) => {
+    const field = fieldsByOriginalId.get(element.dataset.fieldId);
+    field.default_label = element.value;
+  });
+  if (renamedFields.length) {
+    state.config.views.forEach((item) => item.columns.forEach((column) => {
+      const rename = renamedFields.find((change) => change.old_id === column.source_id);
+      if (rename && column.source_type === 'attribute') column.source_id = rename.new_id;
+    }));
+  }
+  return renamedFields;
 }
 
 function saveConfig() {
-  collectEditorChanges();
-  send({ action: 'save_config', config: state.config });
+  const renamedFields = collectEditorChanges();
+  send({ action: 'save_config', config: state.config, renamed_fields: renamedFields });
 }
 
 $('refresh').onclick = () => { status('Scanning assembly…'); send({ action: 'refresh' }); };
 $('copy').onclick = copyTable;
+$('thead').onclick = (event) => {
+  const sort = event.target.dataset.sort;
+  if (!sort) return;
+  const [sourceId, direction] = sort.split(',');
+  state.sort = { sourceId, direction };
+  render();
+};
 $('view').onchange = (event) => {
   const view = state.config.views.find((item) => item.view_id === event.target.value);
   state.table.columns = view.columns.filter((column) => column.visible);
@@ -171,8 +233,8 @@ $('saveAs').onclick = () => {
   if (name === null) return;
   const trimmedName = name.trim();
   if (!trimmedName) return status('Enter a name to save a new table format.', true);
-  collectEditorChanges();
-  send({ action: 'save_as_view', config: state.config, view_id: source.view_id, name: trimmedName });
+  const renamedFields = collectEditorChanges();
+  send({ action: 'save_as_view', config: state.config, view_id: source.view_id, name: trimmedName, renamed_fields: renamedFields });
 };
 $('delete').onclick = () => send({ action: 'delete_view', view_id: currentView().view_id });
 $('addColumn').onclick = () => send({ action: 'add_column', view_id: currentView().view_id, field_id: $('field').value });

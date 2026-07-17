@@ -4,7 +4,7 @@ from ..domain.table_builder import build_table
 from ..persistence.configuration_store import FusionConfigurationStore, new_id
 from ..domain.models import CustomFieldDefinition, ColumnDefinition, BomTableFormat
 from ..fusion.assembly_scanner import scan_design
-from ..fusion.attribute_store import write_value
+from ..fusion.attribute_store import write_value, rename_value
 from .clipboard import copy_text
 
 class PaletteController:
@@ -43,9 +43,10 @@ class PaletteController:
                 value = message.get('value', '')
                 write_value(component, message['field_id'], value)
                 next(row for row in self.rows if row.row_id == message['row_id']).custom_values[message['field_id']] = value
-            elif action == 'save_config': self._apply_config(config, message['config']); self.store.save(design.rootComponent, config)
+            elif action == 'save_config':
+                self._apply_config(config, message['config'], message.get('renamed_fields', [])); self.store.save(design.rootComponent, config)
             elif action == 'save_as_view':
-                self._apply_config(config, message['config'])
+                self._apply_config(config, message['config'], message.get('renamed_fields', []))
                 source = next(v for v in config.views if v.view_id == message['view_id'])
                 config.views.append(BomTableFormat(new_id('view'), message['name'], list(source.columns)))
                 self.store.save(design.rootComponent, config)
@@ -66,9 +67,23 @@ class PaletteController:
             self._send_state(palette, config, message.get('view_id'))
             self.send(palette, {'type':'status','message':'Saved.'})
         except Exception as exc: self.send(palette, {'type':'error','message':str(exc)})
-    def _apply_config(self, config, raw):
+    def _apply_config(self, config, raw, renamed_fields=()):
         from ..persistence.configuration_store import from_dict
-        parsed = from_dict(raw); config.fields, config.views = parsed.fields, parsed.views
+        parsed = from_dict(raw)
+        old_field_ids = {field.field_id for field in config.fields}
+        new_field_ids = {field.field_id for field in parsed.fields}
+        for rename in renamed_fields:
+            old_id, new_id = rename['old_id'], rename['new_id']
+            if old_id not in old_field_ids or new_id not in new_field_ids:
+                raise ValueError('Invalid custom attribute rename.')
+            if old_id == new_id:
+                continue
+            for row in self.rows:
+                row.custom_values[new_id] = row.custom_values.pop(old_id, '')
+                component = self.components.get(row.row_id)
+                if component and not row.linked:
+                    rename_value(component, old_id, new_id)
+        config.fields, config.views = parsed.fields, parsed.views
     def _config(self, config):
         from ..domain.models import configuration_to_dict
         return configuration_to_dict(config)
