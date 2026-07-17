@@ -10,7 +10,8 @@ class PaletteIncomingHandler(adsk.core.HTMLEventHandler):
     def __init__(self, controller): super().__init__(); self.controller = controller
     def notify(self, args):
         palette = self.controller.app.userInterface.palettes.itemById(PALETTE_ID)
-        self.controller.receive(palette, args.data)
+        if args.action == 'fusionBomMessage':
+            self.controller.receive(palette, args.data)
 
 def install(ui, controller):
     command = ui.commandDefinitions.itemById(COMMAND_ID)

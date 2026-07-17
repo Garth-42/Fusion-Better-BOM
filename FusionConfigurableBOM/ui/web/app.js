@@ -1,10 +1,140 @@
-let state={config:null,table:null}; const $=id=>document.getElementById(id); const send=x=>adsk.fusionSendData('fusionBomMessage',JSON.stringify(x));
-window.fusionBomMessage=raw=>{const m=JSON.parse(raw); if(m.type==='error') return status(m.message,true); if(m.type==='status') return status(m.message); if(m.type==='state'){state.config=m.config;state.table=m.table;render();}};
-function status(text,error=false){$('status').textContent=text;$('status').className=error?'error':''}
-function render(){const v=$('view');v.innerHTML=state.config.views.map(x=>`<option value="${x.view_id}">${x.name}</option>`).join('');v.value=state.table.view_id; $('thead').innerHTML='<tr>'+state.table.columns.map(c=>`<th>${escape(c.header)}</th>`).join('')+'</tr>';$('tbody').innerHTML=state.table.rows.map(r=>'<tr>'+state.table.columns.map(c=>cell(r,c)).join('')+'</tr>').join('');renderEditor();}
-function cell(row,c){let value=row.values[c.source_id]??'';if(c.source_type==='attribute')return `<td>${row.linked?`<span title="Linked - open source design to edit">${escape(value)} 🔒</span>`:`<input data-row="${row.row_id}" data-field="${c.source_id}" value="${escape(value)}">`}</td>`;return `<td>${escape(String(value))}</td>`}
-function escape(v){return String(v).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
-function renderEditor(){if(!state.config)return;let view=currentView();$('editView').innerHTML=state.config.views.map(x=>`<option value="${x.view_id}">${x.name}</option>`).join('');$('editView').value=view.view_id;$('viewName').value=view.name;$('field').innerHTML=state.config.fields.map(f=>`<option value="${f.field_id}">${escape(f.default_label)}</option>`).join('');$('columns').innerHTML=view.columns.map((c,i)=>`<div class="column"><input class="header" data-i="${i}" value="${escape(c.header)}"><label><input class="visible" data-i="${i}" type="checkbox" ${c.visible?'checked':''}> Visible</label><button data-move="${i},-1">←</button><button data-move="${i},1">→</button></div>`).join('');}
-function currentView(){return state.config.views.find(v=>v.view_id===$('editView').value)||state.config.views[0]}
-function saveConfig(){let view=currentView();view.name=$('viewName').value.trim()||view.name;document.querySelectorAll('.header').forEach(e=>view.columns[e.dataset.i].header=e.value);document.querySelectorAll('.visible').forEach(e=>view.columns[e.dataset.i].visible=e.checked);send({action:'save_config',config:state.config});}
-$('refresh').onclick=()=>send({action:'refresh'});$('view').onchange=e=>{let v=state.config.views.find(x=>x.view_id===e.target.value);state.table.columns=v.columns.filter(c=>c.visible);state.table.view_id=v.view_id;render()};$('edit').onclick=()=>$('editor').showModal();$('close').onclick=()=>$('editor').close();$('editView').onchange=renderEditor;$('saveConfig').onclick=saveConfig;$('duplicate').onclick=()=>send({action:'duplicate_view',view_id:currentView().view_id,name:currentView().name+' Copy'});$('delete').onclick=()=>send({action:'delete_view',view_id:currentView().view_id});$('addColumn').onclick=()=>send({action:'add_column',view_id:currentView().view_id,field_id:$('field').value});$('addField').onclick=()=>{let label=prompt('Custom field name');if(!label)return;let id=label.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');send({action:'new_field',field_id:id,label,view_id:currentView().view_id})};$('columns').onclick=e=>{if(!e.target.dataset.move)return;let [i,d]=e.target.dataset.move.split(',').map(Number),cols=currentView().columns,j=i+d;if(j<0||j>=cols.length)return;[cols[i],cols[j]]=[cols[j],cols[i]];renderEditor()};$('tbody').onchange=e=>{if(e.target.dataset.row)send({action:'save_cell',row_id:e.target.dataset.row,field_id:e.target.dataset.field,value:e.target.value})};
+/* global adsk */
+
+const state = { config: null, table: null };
+const $ = (id) => document.getElementById(id);
+
+function send(message) {
+  adsk.fusionSendData('fusionBomMessage', JSON.stringify(message));
+}
+
+// Fusion palettes deliver sendInfoToHTML calls through this documented bridge.
+window.fusionJavaScriptHandler = {
+  handle(action, data) {
+    if (action !== 'fusionBomMessage') return;
+
+    try {
+      const message = JSON.parse(data);
+      if (message.type === 'error') return status(message.message, true);
+      if (message.type === 'status') return status(message.message);
+      if (message.type === 'state') {
+        state.config = message.config;
+        state.table = message.table;
+        render();
+      }
+    } catch (error) {
+      status(`Unable to display BOM data: ${error.message}`, true);
+    }
+  },
+};
+
+function status(text, error = false) {
+  $('status').textContent = text;
+  $('status').className = error ? 'error' : '';
+}
+
+function render() {
+  if (!state.config || !state.table) return;
+
+  const viewSelect = $('view');
+  viewSelect.innerHTML = state.config.views
+    .map((view) => `<option value="${escape(view.view_id)}">${escape(view.name)}</option>`)
+    .join('');
+  viewSelect.value = state.table.view_id;
+
+  $('thead').innerHTML = `<tr>${state.table.columns
+    .map((column) => `<th>${escape(column.header)}</th>`)
+    .join('')}</tr>`;
+  $('tbody').innerHTML = state.table.rows
+    .map((row) => `<tr>${state.table.columns.map((column) => cell(row, column)).join('')}</tr>`)
+    .join('');
+
+  $('empty').hidden = state.table.rows.length !== 0;
+  renderEditor();
+  status(`Showing ${state.table.rows.length} unique leaf component${state.table.rows.length === 1 ? '' : 's'}.`);
+}
+
+function cell(row, column) {
+  const value = row.values[column.source_id] ?? '';
+  if (column.source_type !== 'attribute') return `<td>${escape(String(value))}</td>`;
+  if (row.linked) {
+    return `<td><span title="Linked - open source design to edit">${escape(value)} 🔒</span></td>`;
+  }
+  return `<td><input data-row="${escape(row.row_id)}" data-field="${escape(column.source_id)}" value="${escape(value)}"></td>`;
+}
+
+function escape(value) {
+  return String(value).replace(/[&<>"]/g, (character) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;',
+  }[character]));
+}
+
+function currentView() {
+  return state.config.views.find((view) => view.view_id === $('editView').value) || state.config.views[0];
+}
+
+function renderEditor() {
+  if (!state.config) return;
+  const view = currentView();
+  $('editView').innerHTML = state.config.views
+    .map((item) => `<option value="${escape(item.view_id)}">${escape(item.name)}</option>`)
+    .join('');
+  $('editView').value = view.view_id;
+  $('viewName').value = view.name;
+  $('field').innerHTML = state.config.fields
+    .map((field) => `<option value="${escape(field.field_id)}">${escape(field.default_label)}</option>`)
+    .join('');
+  $('columns').innerHTML = view.columns.map((column, index) => `
+    <div class="column">
+      <input class="header" data-index="${index}" value="${escape(column.header)}">
+      <label><input class="visible" data-index="${index}" type="checkbox" ${column.visible ? 'checked' : ''}> Visible</label>
+      <button type="button" data-move="${index},-1">←</button>
+      <button type="button" data-move="${index},1">→</button>
+    </div>`).join('');
+}
+
+function saveConfig() {
+  const view = currentView();
+  view.name = $('viewName').value.trim() || view.name;
+  document.querySelectorAll('.header').forEach((element) => {
+    view.columns[element.dataset.index].header = element.value;
+  });
+  document.querySelectorAll('.visible').forEach((element) => {
+    view.columns[element.dataset.index].visible = element.checked;
+  });
+  send({ action: 'save_config', config: state.config });
+}
+
+$('refresh').onclick = () => { status('Scanning assembly…'); send({ action: 'refresh' }); };
+$('view').onchange = (event) => {
+  const view = state.config.views.find((item) => item.view_id === event.target.value);
+  state.table.columns = view.columns.filter((column) => column.visible);
+  state.table.view_id = view.view_id;
+  render();
+};
+$('edit').onclick = () => $('editor').showModal();
+$('close').onclick = () => $('editor').close();
+$('editView').onchange = renderEditor;
+$('saveConfig').onclick = saveConfig;
+$('duplicate').onclick = () => send({ action: 'duplicate_view', view_id: currentView().view_id, name: `${currentView().name} Copy` });
+$('delete').onclick = () => send({ action: 'delete_view', view_id: currentView().view_id });
+$('addColumn').onclick = () => send({ action: 'add_column', view_id: currentView().view_id, field_id: $('field').value });
+$('addField').onclick = () => {
+  const label = prompt('Custom field name');
+  if (!label) return;
+  const fieldId = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  if (!fieldId) return status('Use at least one letter or number in the field name.', true);
+  send({ action: 'new_field', field_id: fieldId, label, view_id: currentView().view_id });
+};
+$('columns').onclick = (event) => {
+  if (!event.target.dataset.move) return;
+  const [index, direction] = event.target.dataset.move.split(',').map(Number);
+  const columns = currentView().columns;
+  const destination = index + direction;
+  if (destination < 0 || destination >= columns.length) return;
+  [columns[index], columns[destination]] = [columns[destination], columns[index]];
+  renderEditor();
+};
+$('tbody').onchange = (event) => {
+  if (!event.target.dataset.row) return;
+  send({ action: 'save_cell', row_id: event.target.dataset.row, field_id: event.target.dataset.field, value: event.target.value });
+};
