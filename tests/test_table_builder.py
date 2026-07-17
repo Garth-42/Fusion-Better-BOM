@@ -13,6 +13,13 @@ class TableTests(unittest.TestCase):
 
 class _Attributes:
  def itemByName(self, group, name): return None
+class _MapAttribute:
+ def __init__(self,value): self.value=value
+class _MapAttributes:
+ def __init__(self): self._store={}
+ def itemByName(self,group,name): return self._store.get((group,name))
+ def add(self,group,name,value):
+  attribute=_MapAttribute(value); self._store[(group,name)]=attribute; return attribute
 class _Component:
  def __init__(self,name,entity_token=None): self.name=name; self.entityToken=entity_token; self.attributes=_Attributes(); self.partNumber=''; self.description=''; self.material=None; self.isReferencedComponent=False
 class _Children:
@@ -47,3 +54,11 @@ class ScannerTests(unittest.TestCase):
   design=_Design([]); design.rootComponent.occurrences=[_Occurrence(component)]
   rows,_=scan_design(design,[])
   self.assertEqual([(row.component_name, row.quantity) for row in rows],[('Direct occurrence',1)])
+ def test_scan_reads_values_stored_on_the_design_root(self):
+  from FusionConfigurableBOM.fusion.assembly_scanner import scan_design
+  from FusionConfigurableBOM.fusion import value_store
+  component=_Component('Bracket','token-x')
+  design=_Design([_Occurrence(component)]); design.rootComponent.attributes=_MapAttributes()
+  value_store.write_value(design.rootComponent, component, 'manufacturer', 'Acme')
+  rows,_=scan_design(design,['manufacturer'])
+  self.assertEqual(rows[0].custom_values['manufacturer'],'Acme')

@@ -5,6 +5,7 @@ from ..persistence.configuration_store import FusionConfigurationStore, new_id
 from ..domain.models import CustomFieldDefinition, ColumnDefinition, BomTableFormat
 from ..fusion.assembly_scanner import scan_design
 from ..fusion.attribute_store import write_value, rename_value
+from ..fusion.value_store import write_value as write_root_value, rename_field as rename_root_field
 from .clipboard import copy_text
 
 class PaletteController:
@@ -46,7 +47,14 @@ class PaletteController:
                 component = self.components[message['row_id']]
                 if getattr(component, 'isReferencedComponent', False): raise ValueError('Linked components are read-only; open the source design to edit.')
                 value = message.get('value', '')
-                write_value(component, message['field_id'], value)
+                # Authoritative store on the active design's root so the value is
+                # saved with the design; the component write keeps legacy data in
+                # sync but does not persist for parts that live in another file.
+                write_root_value(design.rootComponent, component, message['field_id'], value)
+                try:
+                    write_value(component, message['field_id'], value)
+                except Exception:
+                    pass  # Best-effort legacy mirror; the root store above is authoritative.
                 next(row for row in self.rows if row.row_id == message['row_id']).custom_values[message['field_id']] = value
             elif action == 'save_config':
                 self._apply_config(config, message['config'], message.get('renamed_fields', [])); self.store.save(design.rootComponent, config)
@@ -107,6 +115,7 @@ class PaletteController:
     def _apply_config(self, config, raw, renamed_fields=()):
         from ..persistence.configuration_store import from_dict
         parsed = from_dict(raw)
+        root = getattr(self.app.activeProduct, 'rootComponent', None)
         old_field_ids = {field.field_id for field in config.fields}
         new_field_ids = {field.field_id for field in parsed.fields}
         for rename in renamed_fields:
@@ -115,6 +124,10 @@ class PaletteController:
                 raise ValueError('Invalid custom attribute rename.')
             if old_id == new_id:
                 continue
+            # Migrate the authoritative root-stored values, then the legacy
+            # per-component values, so a renamed column keeps its data.
+            if root is not None:
+                rename_root_field(root, old_id, new_id)
             for row in self.rows:
                 row.custom_values[new_id] = row.custom_values.pop(old_id, '')
                 component = self.components.get(row.row_id)
