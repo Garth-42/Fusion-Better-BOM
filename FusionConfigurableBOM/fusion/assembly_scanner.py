@@ -34,6 +34,23 @@ def _material_name(component):
     return _component_property(material, 'name') if material else None
 
 
+def _component_property(component, name, default=None):
+    """Read an optional Fusion property without failing the whole BOM scan.
+
+    Some imported/referenced component proxies reject an individual metadata
+    fetch (for example `partNumber`) even though the occurrence itself is valid.
+    A missing display value should render as blank, not prevent every row from
+    being shown.
+    """
+    try:
+        return getattr(component, name, default)
+    except Exception:
+        return default
+
+def _material_name(component):
+    material = _component_property(component, 'material')
+    return _component_property(material, 'name') if material else None
+
 def _component_key(component):
     token = _component_property(component, 'entityToken')
     return ('entity_token', token) if token else ('object_id', id(component))
