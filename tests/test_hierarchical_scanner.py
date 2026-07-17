@@ -184,6 +184,35 @@ class HierarchicalScannerTests(unittest.TestCase):
         self.assertEqual(sorted(node.quantity for node in screws), [2, 3])
         self.assertTrue(all(node.custom_values['manufacturer'] == 'Acme' for node in screws))
 
+    def test_same_assembly_definition_with_different_children_keeps_every_child(self):
+        # Three instances can share an assembly definition while their assigned
+        # child occurrences differ. They must not collapse into one node that
+        # follows only the first occurrence's children.
+        assembly = _Component('Fixture', 'fixture')
+        screw = _Component('Screw', 'screw')
+        washer = _Component('Washer', 'washer')
+        design = _Design([
+            _Occurrence(assembly, [_Occurrence(screw)]),
+            _Occurrence(assembly, [_Occurrence(washer)]),
+            _Occurrence(assembly, [_Occurrence(screw)]),
+        ])
+
+        nodes, _ = scan_design_hierarchical(design, [])
+
+        fixtures = [node for node in nodes if node.component_name == 'Fixture']
+        self.assertEqual(sorted(node.quantity for node in fixtures), [1, 2])
+        self.assertEqual([('Screw', 2), ('Washer', 1)],
+                         [(node.component_name, node.total_quantity) for node in nodes if not node.is_assembly])
+
+    def test_all_occurrences_fallback_keeps_a_nonempty_tree_visible(self):
+        component = _Component('Imported part', 'imported')
+        design = _Design([])
+        design.rootComponent.allOccurrences = _OccurrenceList([_Occurrence(component)])
+
+        nodes, _ = scan_design_hierarchical(design, [])
+
+        self.assertEqual([('Imported part', 0)], [(node.component_name, node.level) for node in nodes])
+
     def test_reads_legacy_component_values(self):
         component = _Component('Bracket', 'bracket')
         component.attributes.add(FIELD_ATTRIBUTE_GROUP, 'manufacturer', 'LegacyCo')

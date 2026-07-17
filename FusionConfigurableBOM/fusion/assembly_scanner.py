@@ -127,6 +127,31 @@ def _shared_values(root, component, field_ids):
     values.update(read_root_values(root, component, field_ids))
     return values
 
+def _tree_signature(occurrence):
+    """Return a stable shape signature for an occurrence and its descendants.
+
+    Repeated sibling assemblies can only be represented by one rolled-up tree
+    node when their contents are identical. Grouping solely by component
+    definition loses the children that only occur in the second or third
+    instance of an assembly. The signature keeps equivalent subtrees together
+    while preserving distinct assemblies and all of their assigned parts.
+    """
+    children = _visible(getattr(occurrence, 'childOccurrences', None))
+    return (_component_key(occurrence.component),
+            tuple(sorted((_tree_signature(child) for child in children), key=repr)))
+
+def _hierarchical_root_occurrences(root):
+    """Use the root tree when available, with a visible-data fallback.
+
+    `root.occurrences` is normally authoritative. Some imported designs expose
+    their occurrences only through `allOccurrences`; retaining those rows at
+    level zero is preferable to returning an empty hierarchical BOM.
+    """
+    occurrences = _visible(getattr(root, 'occurrences', None))
+    if occurrences:
+        return occurrences
+    return _visible(getattr(root, 'allOccurrences', None))
+
 def scan_design_hierarchical(design, field_ids):
     """Walk the assembly tree into structured BOM nodes.
 
@@ -140,13 +165,15 @@ def scan_design_hierarchical(design, field_ids):
     root = design.rootComponent
     nodes, components, counter = [], {}, [0]
     def walk(occurrences, parent_id, level, parent_rollup):
-        # Aggregate by component definition among these siblings only. Fusion can
-        # hand back a new proxy per occurrence, so entityToken (via _component_key)
-        # keeps repeated instances of one definition on a single node.
+        # Aggregate equivalent sibling subtrees only. Fusion can hand back a new
+        # proxy per occurrence, so entityToken keeps same definitions together,
+        # but child signatures prevent parts from a non-identical assembly
+        # instance being silently omitted.
         grouped = {}
         for occurrence in occurrences:
             component = occurrence.component
-            entry = grouped.setdefault(_component_key(component),
+            key = _tree_signature(occurrence)
+            entry = grouped.setdefault(key,
                 {'occurrence': occurrence, 'component': component, 'quantity': 0})
             entry['quantity'] += 1
         for entry in grouped.values():
@@ -163,5 +190,5 @@ def scan_design_hierarchical(design, field_ids):
             components[row_id] = component
             if children:
                 walk(children, row_id, level + 1, rollup)
-    walk(_visible(getattr(root, 'occurrences', None)), None, 0, 1)
+    walk(_hierarchical_root_occurrences(root), None, 0, 1)
     return nodes, components
