@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Added a Copy Table button that copies the active view as tab-separated rows for clean pasting into Sheets/Excel.
+- Scoped palette text selection to the table so manual copy no longer grabs the toolbar and status chrome.
+
 ## 0.3.0 - 2026-07-16
 
 - Reined the first implementation scope into a Configurable BOM Concept Validator.
