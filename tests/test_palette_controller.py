@@ -148,6 +148,59 @@ class PaletteControllerTests(unittest.TestCase):
         self.assertEqual(['Saved Configurable BOM changes.'], document.descriptions)
         self.assertEqual([{'type': 'status', 'message': 'Design saved.'}], responses)
 
+    def test_auto_save_persists_the_document_without_manual_action(self):
+        saved = []
+        document = type('Document', (), {'save': lambda self, description: saved.append(description) or True})()
+        app = type('App', (), {'activeDocument': document})()
+        controller = PaletteController(app)
+        responses = []
+        controller.send = lambda palette, payload: responses.append(payload)
+
+        controller.receive(None, json.dumps({'action': 'save_design', 'auto': True}))
+
+        self.assertEqual(['Saved Configurable BOM changes.'], saved)
+        self.assertEqual([{'type': 'status', 'message': 'Design saved.'}], responses)
+
+    def test_auto_save_is_best_effort_when_the_document_cannot_be_saved(self):
+        # An unsaved/untitled document returns False from save(); auto-saves must
+        # not raise, and the one-time hint must not spam on repeated edits.
+        document = type('Document', (), {'save': lambda self, description: False})()
+        app = type('App', (), {'activeDocument': document})()
+        controller = PaletteController(app)
+        responses = []
+        controller.send = lambda palette, payload: responses.append(payload)
+
+        controller.receive(None, json.dumps({'action': 'save_design', 'auto': True}))
+        controller.receive(None, json.dumps({'action': 'save_design', 'auto': True}))
+
+        self.assertFalse(any(response['type'] == 'error' for response in responses))
+        hints = [response for response in responses if response['type'] == 'status']
+        self.assertEqual(1, len(hints))
+        self.assertIn('persist', hints[0]['message'])
+
+    def test_auto_save_ignores_a_missing_document(self):
+        app = type('App', (), {'activeDocument': None})()
+        controller = PaletteController(app)
+        responses = []
+        controller.send = lambda palette, payload: responses.append(payload)
+
+        controller.receive(None, json.dumps({'action': 'save_design', 'auto': True}))
+
+        self.assertEqual([], responses)
+
+    def test_manual_save_reports_when_the_document_cannot_be_saved(self):
+        document = type('Document', (), {'save': lambda self, description: False})()
+        app = type('App', (), {'activeDocument': document})()
+        controller = PaletteController(app)
+        responses = []
+        controller.send = lambda palette, payload: responses.append(payload)
+
+        controller.receive(None, json.dumps({'action': 'save_design'}))
+
+        self.assertEqual(1, len(responses))
+        self.assertEqual('error', responses[0]['type'])
+        self.assertIn('could not save', responses[0]['message'])
+
     def test_renaming_a_custom_attribute_migrates_cached_component_values(self):
         root = object()
         app = type('App', (), {'activeProduct': type('Product', (), {'rootComponent': root})()})()
