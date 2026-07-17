@@ -75,7 +75,7 @@ class PaletteController:
             elif action == 'duplicate_view':
                 source = next(v for v in config.views if v.view_id == message['view_id']); config.views.append(BomTableFormat(new_id('view'), message.get('name', source.name + ' Copy'), list(source.columns))); self.store.save(design.rootComponent, config)
             elif action == 'delete_view':
-                if len(config.views) <= 1 or message['view_id'] in ('general', 'purchasing_demo'): raise ValueError('Default formats cannot be deleted.')
+                if len(config.views) <= 1 or message['view_id'] in ('general', 'purchasing_demo', 'structured'): raise ValueError('Default formats cannot be deleted.')
                 config.views[:] = [v for v in config.views if v.view_id != message['view_id']]; self.store.save(design.rootComponent, config)
             # A cell save originates from the live input element. Returning a full
             # state redraw for every keystroke would replace that element, steal

@@ -19,6 +19,7 @@ class BomTableFormat:
     view_id: str
     name: str
     columns: list[ColumnDefinition]
+    structure: str = 'flat'  # 'flat' (leaf-only) or 'hierarchical' (structured tree)
 
 @dataclass
 class BomConfiguration:
@@ -62,4 +63,4 @@ class HierarchicalBomNode:
 
 def configuration_to_dict(config):
     return {'schema_version': config.schema_version, 'fields': [asdict(f) for f in config.fields],
-            'views': [{'view_id': v.view_id, 'name': v.name, 'columns': [asdict(c) for c in v.columns]} for v in config.views]}
+            'views': [{'view_id': v.view_id, 'name': v.name, 'structure': v.structure, 'columns': [asdict(c) for c in v.columns]} for v in config.views]}

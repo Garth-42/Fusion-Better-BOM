@@ -75,15 +75,22 @@ class HierarchicalBomNode:
   suppressed exclusion, a definition reused under two parents, legacy values, and
   the empty design.
 
-### 2. Configuration + schema migration
+### 2. Configuration + schema migration  — DONE
 
-- Add `structure: 'flat' | 'hierarchical'` to `BomTableFormat` (default `flat`).
-- Bump `SCHEMA_VERSION` 1 -> 2. In `FusionConfigurationStore.load`, migrate a v1
-  document to v2 by defaulting every view to `flat` (no data loss).
-- Update `from_dict`, `configuration_to_dict`, and `validate` to carry and check
-  the new field.
-- Add a default "Structured BOM" view to `default_configuration` (hierarchical;
-  columns: Qty, Total Qty, Component, Part Number, Description).
+- `structure: 'flat' | 'hierarchical'` added to `BomTableFormat` (default `flat`),
+  emitted by `configuration_to_dict` and validated against `STRUCTURES`.
+- `SCHEMA_VERSION` bumped 1 -> 2. `_migrate` (called by `from_dict`, so every
+  load and every UI round-trip goes through it) upgrades a v1 document by bumping
+  the version; `from_dict` then defaults each existing view to `flat`, so no
+  stored field or column data is lost. Unknown versions are still rejected.
+- Default "Structured BOM" view added to `default_configuration` (hierarchical;
+  columns: Qty, Total Qty, Component, Part Number, Description) and protected from
+  deletion alongside the other default views.
+- `tests/test_configuration.py` covers v1 -> v2 migration, the hierarchical
+  default view, structure round-trip, and rejection of an invalid structure.
+
+Note: until step 4 routes the scan by mode, selecting "Structured BOM" renders
+flat scan data (no tree, blank Total Qty). The schema and storage are ready.
 
 ### 3. Table builder passthrough
 

@@ -2,7 +2,8 @@ import json, re, uuid
 from ..constants import CONFIG_ATTRIBUTE_GROUP, CONFIG_ATTRIBUTE_NAME
 from ..domain.models import BomConfiguration, BomTableFormat, ColumnDefinition, CustomFieldDefinition, configuration_to_dict
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+STRUCTURES = ('flat', 'hierarchical')
 _FIELD_RE = re.compile(r'^[a-z][a-z0-9_]{0,63}$')
 
 class ConfigurationError(ValueError): pass
@@ -13,7 +14,8 @@ def default_configuration():
     attribute = lambda key, header: ColumnDefinition('attribute', key, header)
     return BomConfiguration(SCHEMA_VERSION, fields, [
         BomTableFormat('general', 'General BOM', [builtin('quantity','Qty',70), builtin('component_name','Component',220), builtin('fusion_part_number','Part Number',160), builtin('fusion_description','Description',220)]),
-        BomTableFormat('purchasing_demo', 'Purchasing Demo', [builtin('quantity','Qty',70), builtin('component_name','Component',220), attribute('manufacturer','Manufacturer'), attribute('manufacturer_part_number','Manufacturer Part Number'), attribute('supplier','Supplier'), attribute('supplier_part_number','Supplier Part Number')])])
+        BomTableFormat('purchasing_demo', 'Purchasing Demo', [builtin('quantity','Qty',70), builtin('component_name','Component',220), attribute('manufacturer','Manufacturer'), attribute('manufacturer_part_number','Manufacturer Part Number'), attribute('supplier','Supplier'), attribute('supplier_part_number','Supplier Part Number')]),
+        BomTableFormat('structured', 'Structured BOM', [builtin('quantity','Qty',70), builtin('total_quantity','Total Qty',80), builtin('component_name','Component',260), builtin('fusion_part_number','Part Number',160), builtin('fusion_description','Description',220)], 'hierarchical')])
 
 def validate(config):
     if config.schema_version != SCHEMA_VERSION: raise ConfigurationError('Unsupported configuration schema version.')
@@ -21,11 +23,22 @@ def validate(config):
     if len(field_ids) != len(set(field_ids)) or any(not _FIELD_RE.match(i) for i in field_ids): raise ConfigurationError('Field IDs must be unique lowercase identifiers.')
     view_ids = [v.view_id for v in config.views]
     if len(view_ids) != len(set(view_ids)) or not view_ids: raise ConfigurationError('At least one uniquely identified view is required.')
+    if any(v.structure not in STRUCTURES for v in config.views): raise ConfigurationError('View structure must be flat or hierarchical.')
     return config
 
+def _migrate(raw):
+    version = raw.get('schema_version')
+    if version == SCHEMA_VERSION: return raw
+    # v1 predates the per-view structure field. Bumping the version is enough:
+    # from_dict then defaults every existing view to a flat BOM, so no stored
+    # field or column data is lost.
+    if version == 1: return {**raw, 'schema_version': SCHEMA_VERSION}
+    raise ConfigurationError('Unsupported configuration schema version.')
+
 def from_dict(raw):
+    raw = _migrate(raw)
     try:
-        config = BomConfiguration(raw['schema_version'], [CustomFieldDefinition(**f) for f in raw.get('fields',[])], [BomTableFormat(v['view_id'], v['name'], [ColumnDefinition(**c) for c in v.get('columns',[])]) for v in raw.get('views',[])])
+        config = BomConfiguration(raw['schema_version'], [CustomFieldDefinition(**f) for f in raw.get('fields',[])], [BomTableFormat(v['view_id'], v['name'], [ColumnDefinition(**c) for c in v.get('columns',[])], v.get('structure', 'flat')) for v in raw.get('views',[])])
     except (KeyError, TypeError) as exc: raise ConfigurationError('Invalid configuration structure.') from exc
     return validate(config)
 
