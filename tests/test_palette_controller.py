@@ -223,21 +223,36 @@ class PaletteControllerTests(unittest.TestCase):
         self.assertEqual(1, scan.call_count)
         self.assertEqual(1, snapshot.call_count)
 
-    def test_switching_back_to_a_scanned_format_reuses_its_cached_result(self):
-        root = object()
-        app = type('App', (), {'activeProduct': type('Product', (), {'rootComponent': root})()})()
+    def test_format_switches_reuse_the_snapshot_when_root_proxies_churn(self):
+        # Regression: Fusion returns a fresh rootComponent proxy on every access,
+        # so id() of that proxy is different each call. The scan cache must key on
+        # the stable entityToken instead, or every format switch re-walks the whole
+        # assembly -- the "thinks for a while" the caching was meant to remove.
+        class ChurningProduct:
+            token = 'root-token'
+
+            @property
+            def rootComponent(self):
+                # A brand-new proxy each access, mirroring the Fusion API, while
+                # the underlying design identity (the token) stays fixed.
+                return type('Root', (), {'entityToken': ChurningProduct.token})()
+
+        app = type('App', (), {'activeProduct': ChurningProduct()})()
         controller = PaletteController(app)
         controller.store = FakeStore(default_configuration())
         controller.send = lambda palette, payload: None
 
-        with patch('FusionConfigurableBOM.ui.palette_controller.scan_design', return_value=([], {})) as scan, \
-             patch('FusionConfigurableBOM.ui.palette_controller.scan_design_hierarchical', return_value=([], {})):
+        with patch('FusionConfigurableBOM.ui.palette_controller.scan_design_snapshot', return_value=object()) as snapshot, \
+             patch('FusionConfigurableBOM.ui.palette_controller.scan_design_from_snapshot', return_value=([], {})) as flat, \
+             patch('FusionConfigurableBOM.ui.palette_controller.scan_design_hierarchical_from_snapshot', return_value=([], {})):
             controller.refresh(None, 'general')
             controller.refresh(None, 'structured')
             controller.refresh(None, 'general')
 
-        # General is parsed once; returning to it does not walk the assembly again.
-        self.assertEqual(1, scan.call_count)
+        # Despite three different rootComponent proxies, the assembly is walked
+        # once and each shape (flat, hierarchical) is aggregated from that snapshot.
+        self.assertEqual(1, snapshot.call_count)
+        self.assertEqual(1, flat.call_count)
 
     def test_saving_a_cell_propagates_to_every_row_sharing_a_component(self):
         # A hierarchical scan lists one definition as several nodes; a single edit

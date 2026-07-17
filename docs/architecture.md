@@ -141,3 +141,9 @@ Use plain HTML, CSS, and JavaScript. Prefer simple move-left/move-right controls
 ### AD-007: Stop after concept validation
 
 Supplier, export, quantity, and advanced metadata code must not be added until Deliverable 1 is accepted.
+
+### AD-008: Parse the assembly once into a reusable snapshot
+
+Walking the Fusion occurrence tree is the expensive part of drawing the BOM, and it is independent of which table format is on screen. The scanner reads the tree exactly once into a pure-Python `BomSnapshot` (`fusion/assembly_scanner.py`); every format — flat roll-ups and the hierarchical tree alike — is then aggregated from that snapshot without touching Fusion again. Switching formats redraws instantly; only an explicit **Refresh** or an edit invalidates the snapshot and re-walks the tree.
+
+The snapshot cache must be keyed on a **stable** design identity. Fusion returns a new Python proxy on every `activeProduct`/`rootComponent` access, so `id(rootComponent)` changes call-to-call and would invalidate the cache on every switch (re-walking the tree each time — the very cost the snapshot removes). The cache therefore keys on the root component's persistent `entityToken`, falling back to object identity only when no token is available.
