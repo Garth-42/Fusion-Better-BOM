@@ -37,6 +37,11 @@ class PaletteController:
                 write_value(component, message['field_id'], value)
                 next(row for row in self.rows if row.row_id == message['row_id']).custom_values[message['field_id']] = value
             elif action == 'save_config': self._apply_config(config, message['config']); self.store.save(design.rootComponent, config)
+            elif action == 'save_as_view':
+                self._apply_config(config, message['config'])
+                source = next(v for v in config.views if v.view_id == message['view_id'])
+                config.views.append(BomTableFormat(new_id('view'), message['name'], list(source.columns)))
+                self.store.save(design.rootComponent, config)
             elif action == 'new_field':
                 field_id = message['field_id']; config.fields.append(CustomFieldDefinition(field_id, message['label']))
                 for row in self.rows: row.custom_values[field_id] = ''

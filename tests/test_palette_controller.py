@@ -61,3 +61,31 @@ class PaletteControllerTests(unittest.TestCase):
         self.assertFalse(any(response['type'] == 'status' and response['message'] == 'Saved.'
                              for response in responses))
 
+    def test_save_as_creates_a_named_copy_with_pending_column_edits(self):
+        root = object()
+        app = type('App', (), {'activeProduct': type('Product', (), {'rootComponent': root})()})()
+        controller = PaletteController(app)
+        controller.store = FakeStore(default_configuration())
+        responses = []
+        controller.send = lambda palette, payload: responses.append(payload)
+        raw_config = {
+            'schema_version': 1,
+            'fields': [],
+            'views': [{
+                'view_id': 'general', 'name': 'General BOM',
+                'columns': [{'source_type': 'builtin', 'source_id': 'quantity',
+                             'header': 'Count', 'visible': True, 'width': 70}],
+            }],
+        }
+
+        controller.receive(None, json.dumps({
+            'action': 'save_as_view', 'config': raw_config, 'view_id': 'general',
+            'name': 'Assembly summary',
+        }))
+
+        views = controller.store.config.views
+        self.assertEqual(['General BOM', 'Assembly summary'], [view.name for view in views])
+        self.assertEqual('Count', views[1].columns[0].header)
+        self.assertNotEqual(views[0].view_id, views[1].view_id)
+        self.assertTrue(any(response['type'] == 'status' and response['message'] == 'Saved.'
+                            for response in responses))

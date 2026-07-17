@@ -136,7 +136,6 @@ function renderEditor() {
     .map((item) => `<option value="${escape(item.view_id)}">${escape(item.name)}</option>`)
     .join('');
   $('editView').value = view.view_id;
-  $('viewName').value = view.name;
   $('field').innerHTML = state.config.fields
     .map((field) => `<option value="${escape(field.field_id)}">${escape(field.default_label)}</option>`)
     .join('');
@@ -149,15 +148,18 @@ function renderEditor() {
     </div>`).join('');
 }
 
-function saveConfig() {
+function collectEditorChanges() {
   const view = currentView();
-  view.name = $('viewName').value.trim() || view.name;
   document.querySelectorAll('.header').forEach((element) => {
     view.columns[element.dataset.index].header = element.value;
   });
   document.querySelectorAll('.visible').forEach((element) => {
     view.columns[element.dataset.index].visible = element.checked;
   });
+}
+
+function saveConfig() {
+  collectEditorChanges();
   send({ action: 'save_config', config: state.config });
 }
 
@@ -170,10 +172,17 @@ $('view').onchange = (event) => {
   render();
 };
 $('edit').onclick = () => $('editor').showModal();
-$('close').onclick = () => $('editor').close();
 $('editView').onchange = renderEditor;
 $('saveConfig').onclick = saveConfig;
-$('duplicate').onclick = () => send({ action: 'duplicate_view', view_id: currentView().view_id, name: `${currentView().name} Copy` });
+$('saveAs').onclick = () => {
+  const source = currentView();
+  const name = prompt('Name for the new table format', `${source.name} Copy`);
+  if (name === null) return;
+  const trimmedName = name.trim();
+  if (!trimmedName) return status('Enter a name to save a new table format.', true);
+  collectEditorChanges();
+  send({ action: 'save_as_view', config: state.config, view_id: source.view_id, name: trimmedName });
+};
 $('delete').onclick = () => send({ action: 'delete_view', view_id: currentView().view_id });
 $('addColumn').onclick = () => send({ action: 'add_column', view_id: currentView().view_id, field_id: $('field').value });
 $('addField').onclick = () => {
