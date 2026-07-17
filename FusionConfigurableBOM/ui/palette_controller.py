@@ -5,6 +5,7 @@ from ..persistence.configuration_store import FusionConfigurationStore, new_id
 from ..domain.models import CustomFieldDefinition, ColumnDefinition, BomTableFormat
 from ..fusion.assembly_scanner import scan_design
 from ..fusion.attribute_store import write_value
+from .clipboard import copy_text
 
 class PaletteController:
     def __init__(self, app): self.app, self.store, self.rows, self.components = app, FusionConfigurationStore(), [], {}
@@ -29,6 +30,12 @@ class PaletteController:
         try:
             message = json.loads(raw); action = message['action']
             if action == 'refresh': return self.refresh(palette)
+            if action == 'copy_table':
+                try:
+                    copy_text(message['tsv'])
+                except Exception as exc:
+                    return self.send(palette, {'type': 'copy_result', 'copied': False, 'message': str(exc)})
+                return self.send(palette, {'type': 'copy_result', 'copied': True, 'row_count': message['row_count']})
             design = self.app.activeProduct; config = self.store.load(design.rootComponent)
             if action == 'save_cell':
                 component = self.components[message['row_id']]
@@ -37,6 +44,11 @@ class PaletteController:
                 write_value(component, message['field_id'], value)
                 next(row for row in self.rows if row.row_id == message['row_id']).custom_values[message['field_id']] = value
             elif action == 'save_config': self._apply_config(config, message['config']); self.store.save(design.rootComponent, config)
+            elif action == 'save_as_view':
+                self._apply_config(config, message['config'])
+                source = next(v for v in config.views if v.view_id == message['view_id'])
+                config.views.append(BomTableFormat(new_id('view'), message['name'], list(source.columns)))
+                self.store.save(design.rootComponent, config)
             elif action == 'new_field':
                 field_id = message['field_id']; config.fields.append(CustomFieldDefinition(field_id, message['label']))
                 for row in self.rows: row.custom_values[field_id] = ''
