@@ -52,5 +52,5 @@ class AttributeStoreTests(unittest.TestCase):
 
         FusionConfigurationStore().save(root, default_configuration())
 
-        self.assertIn('"schema_version":2', existing.value)
+        self.assertIn('"schema_version":3', existing.value)
         self.assertEqual([], attributes.add_calls)
