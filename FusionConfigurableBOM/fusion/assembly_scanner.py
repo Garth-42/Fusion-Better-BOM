@@ -35,6 +35,23 @@ def _is_linked(component):
     # Document references are the conservative public indicator for externally linked definitions.
     return bool(getattr(component, 'isReferencedComponent', False))
 
+def _component_property(component, name, default=None):
+    """Read an optional Fusion property without failing the whole BOM scan.
+
+    Some imported/referenced component proxies reject an individual metadata
+    fetch (for example `partNumber`) even though the occurrence itself is valid.
+    A missing display value should render as blank, not prevent every row from
+    being shown.
+    """
+    try:
+        return getattr(component, name, default)
+    except Exception:
+        return default
+
+def _material_name(component):
+    material = _component_property(component, 'material')
+    return _component_property(material, 'name') if material else None
+
 def _component_key(component):
     """Use Fusion's persistent entity identity; Python proxy objects may differ per occurrence."""
     token = getattr(component, 'entityToken', None)
@@ -69,7 +86,7 @@ def _rollup_key(component, parent_component, values, rollup_by):
     attributes = tuple(sorted(values.items()))
     component_key = _component_key(component)
     if rollup_by == 'part_number':
-        part_number = (getattr(component, 'partNumber', None) or '').strip()
+        part_number = (_component_property(component, 'partNumber') or '').strip()
         identity = ('part_number', part_number) if part_number else component_key
     elif rollup_by == 'subassembly':
         identity = ('subassembly', _component_key(parent_component) if parent_component else None, component_key)
@@ -113,8 +130,8 @@ def scan_design(design, field_ids, rollup_by='component'):
         # design); fall back to any legacy value written on the component itself.
         values = entry['values']
         rows.append(ConceptBomRow(f'row_{index}', component.name, entry['quantity'],
-            getattr(component, 'partNumber', None), getattr(component, 'description', None),
-            getattr(component, 'material', None).name if getattr(component, 'material', None) else None,
+            _component_property(component, 'partNumber'), _component_property(component, 'description'),
+            _material_name(component),
             _is_linked(component), values,
             getattr(entry['parent_component'], 'name', None)))
     return rows, {f'row_{i}': entry['component'] for i, entry in enumerate(grouped.values(), 1)}
@@ -184,8 +201,8 @@ def scan_design_hierarchical(design, field_ids):
             children = _visible(getattr(entry['occurrence'], 'childOccurrences', None))
             nodes.append(HierarchicalBomNode(row_id, component.name, level, parent_id,
                 quantity, rollup, bool(children),
-                getattr(component, 'partNumber', None), getattr(component, 'description', None),
-                getattr(component, 'material', None).name if getattr(component, 'material', None) else None,
+                _component_property(component, 'partNumber'), _component_property(component, 'description'),
+                _material_name(component),
                 _is_linked(component), _shared_values(root, component, field_ids)))
             components[row_id] = component
             if children:

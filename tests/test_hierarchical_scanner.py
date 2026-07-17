@@ -75,6 +75,25 @@ def _by_name(nodes):
 
 
 class HierarchicalScannerTests(unittest.TestCase):
+    def test_unreadable_part_number_does_not_abort_the_scan(self):
+        class _UnavailablePartNumberComponent(_Component):
+            @property
+            def partNumber(self):
+                raise RuntimeError('3 failed to fetch part number')
+
+            @partNumber.setter
+            def partNumber(self, value):
+                pass
+
+        component = _UnavailablePartNumberComponent('Imported part', 'imported')
+        design = _Design([_Occurrence(component)])
+
+        rows, _ = scan_design(design, [], 'part_number')
+        nodes, _ = scan_design_hierarchical(design, [])
+
+        self.assertEqual([('Imported part', 1)], [(row.component_name, row.quantity) for row in rows])
+        self.assertEqual(['Imported part'], [node.component_name for node in nodes])
+
     def test_part_number_rollup_keeps_unique_custom_values_in_separate_rows(self):
         first = _Component('Screw A', 'screw_a')
         second = _Component('Screw B', 'screw_b')
