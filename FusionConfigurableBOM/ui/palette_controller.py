@@ -8,7 +8,7 @@ from ..fusion.attribute_store import write_value, rename_value
 from .clipboard import copy_text
 
 class PaletteController:
-    def __init__(self, app): self.app, self.store, self.rows, self.components = app, FusionConfigurationStore(), [], {}
+    def __init__(self, app): self.app, self.store, self.rows, self.components, self._auto_save_hinted = app, FusionConfigurationStore(), [], {}, False
     def show(self):
         import adsk.core
         path = os.path.join(os.path.dirname(__file__), 'web', 'index.html')
@@ -34,7 +34,7 @@ class PaletteController:
         try:
             message = json.loads(raw); action = message['action']
             if action == 'refresh': return self.refresh(palette)
-            if action == 'save_design': return self._save_design(palette)
+            if action == 'save_design': return self._save_design(palette, auto=bool(message.get('auto')))
             if action == 'copy_table':
                 try:
                     copy_text(message['tsv'])
@@ -76,12 +76,33 @@ class PaletteController:
                 self._send_state(palette, config, message.get('view_id'))
             self.send(palette, {'type':'status','message':'Saved.'})
         except Exception as exc: self.send(palette, {'type':'error','message':str(exc)})
-    def _save_design(self, palette):
+    def _save_design(self, palette, auto=False):
+        # Fusion attributes only reach disk when the document is saved, and adding
+        # an attribute does not mark the document modified, so Fusion never prompts
+        # on close. Persisting here is what actually survives a close/reopen.
         document = getattr(self.app, 'activeDocument', None)
         if not document:
+            if auto:
+                return
             raise ValueError('Open a Fusion design before saving BOM changes.')
-        if not document.save('Saved Configurable BOM changes.'):
-            raise RuntimeError('Fusion could not save the active design.')
+        try:
+            saved = document.save('Saved Configurable BOM changes.')
+        except Exception:
+            # Auto-saves are best-effort; the manual Save design button surfaces errors.
+            if auto:
+                return
+            raise
+        if not saved:
+            hint = 'Save the design in Fusion once (File ▸ Save) so BOM edits can persist.'
+            if not auto:
+                raise RuntimeError('Fusion could not save the active design. ' + hint)
+            # An unsaved/untitled document cannot be saved from here; hint once so
+            # repeated auto-saves do not spam the status line.
+            if not self._auto_save_hinted:
+                self._auto_save_hinted = True
+                self.send(palette, {'type': 'status', 'message': hint})
+            return
+        self._auto_save_hinted = False
         self.send(palette, {'type': 'status', 'message': 'Design saved.'})
     def _apply_config(self, config, raw, renamed_fields=()):
         from ..persistence.configuration_store import from_dict

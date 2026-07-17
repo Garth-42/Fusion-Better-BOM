@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Persisted BOM attribute and format edits automatically by debounce-saving the Fusion document a moment after editing stops, so values survive closing and reopening Fusion without a manual save.
+- Kept the Save design button for an immediate save and made saves best-effort on documents that have not been saved to a project yet.
 - Added a Copy Table button that copies the active view as tab-separated rows for clean pasting into Sheets/Excel.
 - Scoped palette text selection to the table so manual copy no longer grabs the toolbar and status chrome.
 

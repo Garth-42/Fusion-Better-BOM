@@ -3,10 +3,34 @@
 const state = { config: null, table: null, sort: null };
 const $ = (id) => document.getElementById(id);
 let copyFeedbackTimer;
+let autoSaveTimer;
+
+// Attribute and configuration edits live in Fusion attributes, which only reach
+// disk when the document is saved. Saving on every keystroke would be slow, so
+// mutating actions schedule a debounced save that coalesces a burst of edits
+// into a single persist. The manual Save design button stays for an immediate save.
+const AUTO_SAVE_DELAY_MS = 900;
+const MUTATING_ACTIONS = new Set([
+  'save_cell', 'save_config', 'save_as_view', 'new_field',
+  'add_column', 'duplicate_view', 'delete_view',
+]);
 
 function send(message) {
   if (state.table && !message.view_id) message.view_id = state.table.view_id;
   adsk.fusionSendData('fusionBomMessage', JSON.stringify(message));
+  if (MUTATING_ACTIONS.has(message.action)) scheduleAutoSave();
+}
+
+function scheduleAutoSave() {
+  clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(flushAutoSave, AUTO_SAVE_DELAY_MS);
+}
+
+function flushAutoSave() {
+  clearTimeout(autoSaveTimer);
+  // `auto` keeps this best-effort: a document that cannot be saved yet must not
+  // raise the way an explicit Save design click does.
+  send({ action: 'save_design', auto: true });
 }
 
 // Fusion palettes deliver sendInfoToHTML calls through this documented bridge.
@@ -218,7 +242,7 @@ function saveConfig() {
 }
 
 $('refresh').onclick = () => { status('Scanning assembly…'); send({ action: 'refresh' }); };
-$('saveDesign').onclick = () => { status('Saving Fusion design…'); send({ action: 'save_design' }); };
+$('saveDesign').onclick = () => { clearTimeout(autoSaveTimer); status('Saving Fusion design…'); send({ action: 'save_design' }); };
 $('copy').onclick = copyTable;
 $('thead').onclick = (event) => {
   const sort = event.target.dataset.sort;
@@ -263,10 +287,19 @@ $('columns').onclick = (event) => {
   [columns[index], columns[destination]] = [columns[destination], columns[index]];
   renderEditor();
 };
-// `change` only fires after the input loses focus.  Saving on `input` makes the
-// attribute write happen while the user is typing, including when they close
-// Fusion directly from the active cell.
+// `input` writes the value into the Fusion attribute while the user types so the
+// live table stays correct; the debounced auto-save (scheduled by `send`) then
+// persists it to the document a moment after typing stops.
 $('tbody').oninput = (event) => {
   if (!event.target.dataset.row) return;
   send({ action: 'save_cell', row_id: event.target.dataset.row, field_id: event.target.dataset.field, value: event.target.value });
+};
+// Persist promptly when focus leaves the table entirely (clicking the model, a
+// toolbar button, or another panel — often just before closing Fusion). Moving
+// between cells stays coalesced by the debounce instead of saving per cell.
+$('tbody').onfocusout = (event) => {
+  if (!event.target.dataset || !event.target.dataset.row) return;
+  const goingTo = event.relatedTarget;
+  if (goingTo && $('tbody').contains(goingTo)) return;
+  flushAutoSave();
 };
