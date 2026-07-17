@@ -166,6 +166,20 @@ class HierarchicalScannerTests(unittest.TestCase):
         self.assertEqual(nodes['Gearbox'].total_quantity, 2)
         self.assertEqual(nodes['Bracket'].total_quantity, 1)
 
+    def test_tree_signatures_are_memoized_for_repeated_nested_assemblies(self):
+        # A large repeated hierarchy asks for signatures at several depths. This
+        # guards the memoization that prevents repeated descendant traversals.
+        leaf = _Component('Leaf', 'leaf')
+        middle = _Component('Middle', 'middle')
+        top = _Component('Top', 'top')
+        middle_occurrence = _Occurrence(middle, [_Occurrence(leaf)])
+        design = _Design([_Occurrence(top, [middle_occurrence]), _Occurrence(top, [middle_occurrence])])
+
+        nodes, _ = scan_design_hierarchical(design, [])
+
+        self.assertEqual([('Top', 2), ('Middle', 2), ('Leaf', 2)],
+                         [(node.component_name, node.total_quantity) for node in nodes])
+
     def test_assembly_flag_and_parent_links(self):
         nodes, _ = scan_design_hierarchical(self._nested_design(), [])
         by_name = _by_name(nodes)

@@ -314,10 +314,13 @@ $('thead').onclick = (event) => {
 };
 $('view').onchange = (event) => {
   const view = state.config.views.find((item) => item.view_id === event.target.value);
-  // Flat and hierarchical views need differently shaped rows (aggregated leaves
-  // vs tree nodes), so switching the BOM structure re-scans in the new mode
-  // instead of just re-filtering columns from the current rows.
-  if ((view.structure || 'flat') !== (state.table.structure || 'flat')) {
+  // Different structures and flat roll-up modes need differently aggregated
+  // rows. The controller reuses a cached scan when this combination has already
+  // been visited, avoiding another occurrence-tree walk.
+  const structureChanged = (view.structure || 'flat') !== (state.table.structure || 'flat');
+  const rollupChanged = (view.structure || 'flat') === 'flat'
+    && (view.rollup_by || 'component') !== (state.table.rollup_by || 'component');
+  if (structureChanged || rollupChanged) {
     status('Scanning assembly…');
     return send({ action: 'refresh', view_id: view.view_id });
   }

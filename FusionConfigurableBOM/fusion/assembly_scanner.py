@@ -144,7 +144,7 @@ def _shared_values(root, component, field_ids):
     values.update(read_root_values(root, component, field_ids))
     return values
 
-def _tree_signature(occurrence):
+def _tree_signature(occurrence, cache):
     """Return a stable shape signature for an occurrence and its descendants.
 
     Repeated sibling assemblies can only be represented by one rolled-up tree
@@ -153,9 +153,14 @@ def _tree_signature(occurrence):
     instance of an assembly. The signature keeps equivalent subtrees together
     while preserving distinct assemblies and all of their assigned parts.
     """
+    occurrence_id = id(occurrence)
+    if occurrence_id in cache:
+        return cache[occurrence_id]
     children = _visible(getattr(occurrence, 'childOccurrences', None))
-    return (_component_key(occurrence.component),
-            tuple(sorted((_tree_signature(child) for child in children), key=repr)))
+    signature = (_component_key(occurrence.component),
+                 tuple(sorted((_tree_signature(child, cache) for child in children), key=repr)))
+    cache[occurrence_id] = signature
+    return signature
 
 def _hierarchical_root_occurrences(root):
     """Use the root tree when available, with a visible-data fallback.
@@ -180,7 +185,7 @@ def scan_design_hierarchical(design, field_ids):
     reports how many exist in the whole design along that path.
     """
     root = design.rootComponent
-    nodes, components, counter = [], {}, [0]
+    nodes, components, counter, signature_cache = [], {}, [0], {}
     def walk(occurrences, parent_id, level, parent_rollup):
         # Aggregate equivalent sibling subtrees only. Fusion can hand back a new
         # proxy per occurrence, so entityToken keeps same definitions together,
@@ -189,7 +194,7 @@ def scan_design_hierarchical(design, field_ids):
         grouped = {}
         for occurrence in occurrences:
             component = occurrence.component
-            key = _tree_signature(occurrence)
+            key = _tree_signature(occurrence, signature_cache)
             entry = grouped.setdefault(key,
                 {'occurrence': occurrence, 'component': component, 'quantity': 0})
             entry['quantity'] += 1

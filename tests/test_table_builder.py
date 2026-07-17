@@ -14,6 +14,7 @@ class TableTests(unittest.TestCase):
   view=BomTableFormat('v','V',[ColumnDefinition('builtin','component_name','Component')])
   table=build_table([ConceptBomRow('a','Bracket',1)],view)
   self.assertEqual(table['structure'],'flat'); self.assertNotIn('level',table['rows'][0])
+  self.assertEqual(table['rollup_by'],'component')
  def test_hierarchical_view_emits_tree_metadata_and_total_quantity(self):
   view=BomTableFormat('v','V',[ColumnDefinition('builtin','component_name','Component'),ColumnDefinition('builtin','total_quantity','Total')],'hierarchical')
   parent=HierarchicalBomNode('r1','Gearbox',0,None,2,2,True)
