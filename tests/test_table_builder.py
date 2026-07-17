@@ -17,8 +17,10 @@ class _Component:
  def __init__(self,name): self.name=name; self.attributes=_Attributes(); self.partNumber=''; self.description=''; self.material=None; self.isReferencedComponent=False
 class _Children:
  count=0
+class _NonLeafChildren:
+ count=1
 class _Occurrence:
- def __init__(self,component): self.component=component; self.childOccurrences=_Children(); self.isSuppressed=False
+ def __init__(self,component,children=None): self.component=component; self.childOccurrences=children or _Children(); self.isSuppressed=False
 class _Root:
  def __init__(self,occurrences): self.allOccurrences=occurrences
 class _Design:
@@ -29,3 +31,8 @@ class ScannerTests(unittest.TestCase):
   repeated=_Component('Bracket'); distinct=_Component('Bracket')
   rows,_=scan_design(_Design([_Occurrence(repeated),_Occurrence(repeated),_Occurrence(repeated),_Occurrence(distinct)]),[])
   self.assertEqual(sorted(row.quantity for row in rows),[1,3])
+ def test_non_leaf_only_assembly_falls_back_to_visible_occurrences(self):
+  from FusionConfigurableBOM.fusion.assembly_scanner import scan_design
+  component=_Component('Imported assembly')
+  rows,_=scan_design(_Design([_Occurrence(component, _NonLeafChildren())]),[])
+  self.assertEqual([(row.component_name, row.quantity) for row in rows],[('Imported assembly',1)])

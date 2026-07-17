@@ -51,7 +51,7 @@ function render() {
 
   $('empty').hidden = state.table.rows.length !== 0;
   renderEditor();
-  status(`Showing ${state.table.rows.length} unique leaf component${state.table.rows.length === 1 ? '' : 's'}.`);
+  status(`Showing ${state.table.rows.length} unique component${state.table.rows.length === 1 ? '' : 's'}.`);
 }
 
 function cell(row, column) {
