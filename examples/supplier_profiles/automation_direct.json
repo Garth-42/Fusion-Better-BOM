@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "profile_id": "automation_direct_cart_csv",
+  "profile_version": "1.0.0",
+  "supplier_id": "automation_direct",
+  "display_name": "AutomationDirect Cart Upload",
+  "capability": "direct_upload",
+  "file_extension": ".csv",
+  "encoding": "utf-8",
+  "delimiter": ",",
+  "line_ending": "crlf",
+  "include_header": false,
+  "columns": [
+    {
+      "source": "supplier_part_number",
+      "required": true
+    },
+    {
+      "source": "order_units",
+      "required": true
+    }
+  ],
+  "verification": {
+    "status": "verified",
+    "verified_date": "2026-07-16",
+    "source": "https://www.automationdirect.com/help/csvupload",
+    "notes": "Official two-column item code and quantity workflow."
+  }
+}
