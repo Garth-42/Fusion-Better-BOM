@@ -13,7 +13,11 @@ class PaletteController:
         import adsk.core
         path = os.path.join(os.path.dirname(__file__), 'web', 'index.html')
         palette = self.app.userInterface.palettes.itemById(PALETTE_ID)
-        if not palette: palette = self.app.userInterface.palettes.add(PALETTE_ID, 'Configurable BOM', 'file:///' + path.replace('\\','/'), True, True, True, 900, 600)
+        if not palette:
+            palette = self.app.userInterface.palettes.add(PALETTE_ID, 'Configurable BOM', 'file:///' + path.replace('\\','/'), True, True, True, 900, 600)
+            # A floating palette is a separate Fusion window, so it opens above
+            # the Browser/feature tree instead of being obscured by that panel.
+            palette.dockingState = adsk.core.PaletteDockingStates.PaletteDockingStateFloating
         palette.isVisible = True
         return palette
     def refresh(self, palette):
