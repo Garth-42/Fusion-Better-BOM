@@ -42,7 +42,7 @@ class PaletteControllerTests(unittest.TestCase):
         self.assertEqual('floating', palette.dockingState)
         self.assertTrue(palette.isVisible)
 
-    def test_saving_a_cell_updates_cached_table_without_rescanning(self):
+    def test_saving_a_cell_updates_cached_value_without_redrawing_the_input(self):
         root = object()
         app = type('App', (), {'activeProduct': type('Product', (), {'rootComponent': root})()})()
         controller = PaletteController(app)
@@ -59,8 +59,9 @@ class PaletteControllerTests(unittest.TestCase):
             }))
 
         write_value.assert_called_once_with(controller.components['row_1'], 'manufacturer', 'Acme')
-        state = next(response for response in responses if response['type'] == 'state')
-        self.assertEqual('Acme', state['table']['rows'][0]['values']['manufacturer'])
+        self.assertEqual('Acme', controller.rows[0].custom_values['manufacturer'])
+        self.assertFalse(any(response['type'] == 'state' for response in responses))
+        self.assertIn({'type': 'status', 'message': 'Saved.'}, responses)
 
     def test_refresh_action_scans_the_design_and_sends_rows(self):
         root = object()
