@@ -45,7 +45,9 @@ th:last-child, td:last-child { border-right: 0; }
 tbody tr:last-child td { border-bottom: 0; }
 th { background: var(--surface-muted); font-weight: 600; }
 tbody tr:hover { background: var(--surface-muted); }
-td input { width: 100%; min-width: 110px; padding: 4px 6px; }
+td input { width: 100%; min-width: 110px; padding: 0; color: inherit; background: transparent; border-color: transparent; }
+td input:hover { border-color: var(--input-border); }
+td input:focus { background: var(--surface); border-color: var(--focus); }
 #empty { color: var(--muted); }
 
 dialog { width: min(680px, calc(100vw - 28px)); max-height: calc(100vh - 28px); margin: auto; padding: 0; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); }
@@ -55,7 +57,9 @@ dialog form { padding: 20px; }
 .eyebrow { margin: 0 0 3px; color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .dialog-heading h2 { margin: 0; font-size: 20px; }
 .dialog-description { margin: 5px 0 0; color: var(--muted); }
-.icon-button { width: 30px; height: 30px; padding: 0; border-radius: 50%; font-size: 22px; line-height: 1; }
+.icon-button { display: grid; width: 32px; height: 32px; padding: 0; place-items: center; color: var(--muted); background: var(--surface-muted); border-color: var(--border); border-radius: 7px; }
+.icon-button:hover { color: var(--text); background: var(--bg); border-color: var(--input-border); }
+.icon-button svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-width: 2; }
 .format-actions { display: flex; align-items: center; gap: 8px; }
 .format-actions select { min-width: 180px; flex: 1; }
 .editor-section { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
