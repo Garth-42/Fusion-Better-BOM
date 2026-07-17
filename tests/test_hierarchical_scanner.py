@@ -2,7 +2,7 @@ import unittest
 
 from FusionConfigurableBOM.constants import FIELD_ATTRIBUTE_GROUP
 from FusionConfigurableBOM.fusion import value_store
-from FusionConfigurableBOM.fusion.assembly_scanner import scan_design_hierarchical
+from FusionConfigurableBOM.fusion.assembly_scanner import scan_design, scan_design_hierarchical
 
 
 class _Attribute:
@@ -75,6 +75,44 @@ def _by_name(nodes):
 
 
 class HierarchicalScannerTests(unittest.TestCase):
+    def test_part_number_rollup_keeps_unique_custom_values_in_separate_rows(self):
+        first = _Component('Screw A', 'screw_a')
+        second = _Component('Screw B', 'screw_b')
+        first.partNumber = second.partNumber = 'M3-10'
+        design = _Design([_Occurrence(first), _Occurrence(second)])
+        value_store.write_value(design.rootComponent, first, 'finish', 'Zinc')
+        value_store.write_value(design.rootComponent, second, 'finish', 'Black oxide')
+
+        rows, _ = scan_design(design, ['finish'], 'part_number')
+
+        self.assertEqual(2, len(rows))
+        self.assertEqual({'Zinc', 'Black oxide'}, {row.custom_values['finish'] for row in rows})
+
+    def test_part_number_rollup_combines_matching_custom_values(self):
+        first = _Component('Screw A', 'screw_a')
+        second = _Component('Screw B', 'screw_b')
+        first.partNumber = second.partNumber = 'M3-10'
+        design = _Design([_Occurrence(first), _Occurrence(second)])
+        for component in (first, second):
+            value_store.write_value(design.rootComponent, component, 'finish', 'Zinc')
+
+        rows, _ = scan_design(design, ['finish'], 'part_number')
+
+        self.assertEqual(1, len(rows))
+        self.assertEqual(2, rows[0].quantity)
+
+    def test_subassembly_rollup_keeps_identical_parts_in_their_parent_rows(self):
+        screw = _Component('Screw', 'screw')
+        left = _Component('Left assembly', 'left')
+        right = _Component('Right assembly', 'right')
+        design = _Design([_Occurrence(left, [_Occurrence(screw)]), _Occurrence(right, [_Occurrence(screw)])])
+
+        rows, _ = scan_design(design, [], 'subassembly')
+
+        screws = [row for row in rows if row.component_name == 'Screw']
+        self.assertEqual(2, len(screws))
+        self.assertEqual({'Left assembly', 'Right assembly'}, {row.parent_assembly for row in screws})
+
     def _nested_design(self):
         # Root
         #   Gearbox  (x2 identical sub-assemblies)
