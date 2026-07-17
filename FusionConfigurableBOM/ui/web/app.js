@@ -18,6 +18,10 @@ window.fusionJavaScriptHandler = {
       const message = JSON.parse(data);
       if (message.type === 'error') return status(message.message, true);
       if (message.type === 'status') return status(message.message);
+      if (message.type === 'copy_result') {
+        showCopyFeedback(message.copied, message.row_count);
+        return message.copied ? undefined : status(message.message, true);
+      }
       if (message.type === 'state') {
         state.config = message.config;
         state.table = message.table;
@@ -88,29 +92,6 @@ function tableToTsv() {
   return lines.map((cells) => cells.map(tsvCell).join('\t')).join('\r\n');
 }
 
-// Fusion's palette does not always grant the async Clipboard API, so keep a
-// textarea + execCommand fallback for the copy button.
-function legacyCopy(text) {
-  const textarea = document.createElement('textarea');
-  textarea.value = text;
-  textarea.setAttribute('readonly', '');
-  textarea.style.position = 'fixed';
-  textarea.style.top = '0';
-  textarea.style.left = '0';
-  textarea.style.opacity = '0';
-  document.body.appendChild(textarea);
-  textarea.focus();
-  textarea.select();
-  let copied = false;
-  try {
-    copied = document.execCommand('copy');
-  } catch (error) {
-    copied = false;
-  }
-  document.body.removeChild(textarea);
-  return copied;
-}
-
 function showCopyFeedback(copied, count) {
   const button = $('copy');
   clearTimeout(copyFeedbackTimer);
@@ -124,24 +105,13 @@ function showCopyFeedback(copied, count) {
   if (copied) status(`Copied ${count} row${count === 1 ? '' : 's'}. Paste into your spreadsheet.`);
 }
 
-async function copyTable() {
+function copyTable() {
   if (!state.table || state.table.rows.length === 0) {
     return status('Nothing to copy yet — click Refresh to scan the assembly.', true);
   }
   const tsv = tableToTsv();
-  const count = state.table.rows.length;
-  const confirm = () => showCopyFeedback(true, count);
-  try {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(tsv);
-      return confirm();
-    }
-  } catch (error) {
-    // Clipboard API blocked in this palette context; fall through to the fallback.
-  }
-  if (legacyCopy(tsv)) return confirm();
-  showCopyFeedback(false);
-  return status('Unable to access the clipboard. Select and copy the table manually.', true);
+  status('Copying table to the system clipboard…');
+  send({ action: 'copy_table', tsv, row_count: state.table.rows.length });
 }
 
 function currentView() {

@@ -5,6 +5,7 @@ from ..persistence.configuration_store import FusionConfigurationStore, new_id
 from ..domain.models import CustomFieldDefinition, ColumnDefinition, BomTableFormat
 from ..fusion.assembly_scanner import scan_design
 from ..fusion.attribute_store import write_value
+from .clipboard import copy_text
 
 class PaletteController:
     def __init__(self, app): self.app, self.store, self.rows, self.components = app, FusionConfigurationStore(), [], {}
@@ -29,6 +30,12 @@ class PaletteController:
         try:
             message = json.loads(raw); action = message['action']
             if action == 'refresh': return self.refresh(palette)
+            if action == 'copy_table':
+                try:
+                    copy_text(message['tsv'])
+                except Exception as exc:
+                    return self.send(palette, {'type': 'copy_result', 'copied': False, 'message': str(exc)})
+                return self.send(palette, {'type': 'copy_result', 'copied': True, 'row_count': message['row_count']})
             design = self.app.activeProduct; config = self.store.load(design.rootComponent)
             if action == 'save_cell':
                 component = self.components[message['row_id']]

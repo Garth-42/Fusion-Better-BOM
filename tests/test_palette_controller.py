@@ -89,3 +89,17 @@ class PaletteControllerTests(unittest.TestCase):
         self.assertNotEqual(views[0].view_id, views[1].view_id)
         self.assertTrue(any(response['type'] == 'status' and response['message'] == 'Saved.'
                             for response in responses))
+
+    def test_copy_table_uses_the_host_clipboard(self):
+        app = type('App', (), {'activeProduct': None})()
+        controller = PaletteController(app)
+        responses = []
+        controller.send = lambda palette, payload: responses.append(payload)
+
+        with patch('FusionConfigurableBOM.ui.palette_controller.copy_text') as copy_text:
+            controller.receive(None, json.dumps({
+                'action': 'copy_table', 'tsv': 'Qty\tPart\r\n1\tBracket', 'row_count': 1,
+            }))
+
+        copy_text.assert_called_once_with('Qty\tPart\r\n1\tBracket')
+        self.assertEqual({'type': 'copy_result', 'copied': True, 'row_count': 1}, responses[0])
