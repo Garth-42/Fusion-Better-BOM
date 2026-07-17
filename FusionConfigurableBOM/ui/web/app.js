@@ -159,20 +159,21 @@ function renderEditor() {
   $('field').innerHTML = state.config.fields
     .map((field) => `<option value="${escape(field.field_id)}">${escape(field.default_label)}</option>`)
     .join('');
-  $('columns').innerHTML = view.columns.map((column, index) => `
+  $('columns').innerHTML = view.columns.map((column, index) => {
+    const isAttribute = column.source_type === 'attribute';
+    return `
     <div class="column">
-      <input class="header" data-index="${index}" value="${escape(column.header)}">
+      <label class="column-header">Column header<input class="header" data-index="${index}" value="${escape(column.header)}"></label>
+      ${isAttribute
+    ? `<label class="attribute-key">Attribute key<input class="field-id" data-original-id="${escape(column.source_id)}" value="${escape(column.source_id)}" aria-label="Attribute key for ${escape(column.header)}"></label>`
+    : `<span class="builtin-source">Built-in field: ${escape(column.source_id)}</span>`}
       <label><input class="visible" data-index="${index}" type="checkbox" ${column.visible ? 'checked' : ''}> Visible</label>
       <div class="column-actions" aria-label="Reorder column">
         <button type="button" data-move="${index},-1" aria-label="Move ${escape(column.header)} up" title="Move up" ${index === 0 ? 'disabled' : ''}>↑</button>
         <button type="button" data-move="${index},1" aria-label="Move ${escape(column.header)} down" title="Move down" ${index === view.columns.length - 1 ? 'disabled' : ''}>↓</button>
       </div>
-    </div>`).join('');
-  $('attributes').innerHTML = state.config.fields.map((field) => `
-    <div class="attribute-definition">
-      <label>Attribute key<input class="field-id" data-original-id="${escape(field.field_id)}" value="${escape(field.field_id)}" aria-label="Attribute key for ${escape(field.default_label)}"></label>
-      <label>Display name<input class="field-label" data-field-id="${escape(field.field_id)}" value="${escape(field.default_label)}" aria-label="Display name for ${escape(field.field_id)}"></label>
-    </div>`).join('') || '<p class="empty-fields">No custom attributes have been added.</p>';
+    </div>`;
+  }).join('');
 }
 
 function collectEditorChanges() {
@@ -183,6 +184,17 @@ function collectEditorChanges() {
   document.querySelectorAll('.visible').forEach((element) => {
     view.columns[element.dataset.index].visible = element.checked;
   });
+  const displayNames = new Map(view.columns
+    .filter((column) => column.source_type === 'attribute')
+    .map((column) => [column.source_id, column.header]));
+  state.config.fields.forEach((field) => {
+    const displayName = displayNames.get(field.field_id);
+    if (displayName === undefined) return;
+    field.default_label = displayName;
+    state.config.views.forEach((item) => item.columns.forEach((column) => {
+      if (column.source_type === 'attribute' && column.source_id === field.field_id) column.header = displayName;
+    }));
+  });
   const renamedFields = [];
   const fieldsByOriginalId = new Map(state.config.fields.map((field) => [field.field_id, field]));
   document.querySelectorAll('.field-id').forEach((element) => {
@@ -190,10 +202,6 @@ function collectEditorChanges() {
     const fieldId = element.value.trim();
     if (fieldId !== field.field_id) renamedFields.push({ old_id: field.field_id, new_id: fieldId });
     field.field_id = fieldId;
-  });
-  document.querySelectorAll('.field-label').forEach((element) => {
-    const field = fieldsByOriginalId.get(element.dataset.fieldId);
-    field.default_label = element.value;
   });
   if (renamedFields.length) {
     state.config.views.forEach((item) => item.columns.forEach((column) => {

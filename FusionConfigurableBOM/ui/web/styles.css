@@ -76,11 +76,11 @@ dialog form { padding: 20px; }
 .section-heading h3 { margin: 0; font-size: 14px; }
 .section-heading span { color: var(--muted); font-size: 12px; }
 .section-description { margin: -2px 0 10px; color: var(--muted); font-size: 12px; line-height: 1.4; }
-.attribute-definition { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(150px, 1.4fr); gap: 8px; margin: 7px 0; padding: 8px; background: var(--surface-muted); border-radius: 6px; }
-.attribute-definition label { display: grid; gap: 4px; color: var(--muted); font-size: 11px; font-weight: 600; }
-.empty-fields { margin: 0; color: var(--muted); }
 .column { display: flex; align-items: center; gap: 8px; margin: 7px 0; padding: 7px; background: var(--surface-muted); border-radius: 6px; }
+.column-header, .attribute-key { display: grid !important; gap: 4px !important; color: var(--muted); font-size: 11px; font-weight: 600; }
 .column .header { width: 220px; max-width: 45%; }
+.attribute-key input { width: 150px; }
+.builtin-source { color: var(--muted); font-size: 12px; }
 .column label { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
 .column-actions { display: flex; flex-direction: column; gap: 3px; }
 .column-actions button { padding: 1px 8px; line-height: 1.1; }
@@ -93,6 +93,5 @@ dialog form { padding: 20px; }
   .toolbar-actions button { flex: 1; }
   .format-actions select { width: 100%; }
   .column .header { width: 100%; max-width: none; }
-  .attribute-definition { grid-template-columns: 1fr; }
   .section-heading { flex-direction: column; align-items: flex-start; gap: 3px; }
 }
