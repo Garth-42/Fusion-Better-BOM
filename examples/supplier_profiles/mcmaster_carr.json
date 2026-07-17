@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "profile_id": "mcmaster_order_worksheet",
+  "profile_version": "1.0.0",
+  "supplier_id": "mcmaster_carr",
+  "display_name": "McMaster-Carr Order Worksheet",
+  "capability": "ordering_worksheet",
+  "file_extension": ".csv",
+  "encoding": "utf-8-sig",
+  "delimiter": ",",
+  "line_ending": "crlf",
+  "include_header": true,
+  "columns": [
+    {
+      "header": "McMaster Part Number",
+      "source": "supplier_part_number",
+      "required": true
+    },
+    {
+      "header": "Order Units",
+      "source": "order_units",
+      "required": true
+    },
+    {
+      "header": "Required Individual Units",
+      "source": "required_quantity",
+      "required": true
+    },
+    {
+      "header": "Units Per Order Unit",
+      "source": "units_per_order_unit",
+      "required": true
+    },
+    {
+      "header": "Customer Reference",
+      "source": "internal_part_number",
+      "required": false
+    },
+    {
+      "header": "Description",
+      "source": "description",
+      "required": false
+    },
+    {
+      "header": "Product URL",
+      "source": "product_url",
+      "required": false
+    }
+  ],
+  "verification": {
+    "status": "unverified",
+    "verified_date": null,
+    "source": "https://www.mcmaster.com/eprocurement/",
+    "notes": "Worksheet only; public CSV cart-upload format not asserted."
+  }
+}
