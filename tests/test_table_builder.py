@@ -22,7 +22,7 @@ class _NonLeafChildren:
 class _Occurrence:
  def __init__(self,component,children=None): self.component=component; self.childOccurrences=children or _Children(); self.isSuppressed=False
 class _Root:
- def __init__(self,occurrences): self.allOccurrences=occurrences
+ def __init__(self,occurrences,root_occurrences=None): self.allOccurrences=occurrences; self.occurrences=root_occurrences or []
 class _Design:
  def __init__(self,occurrences): self.rootComponent=_Root(occurrences)
 class ScannerTests(unittest.TestCase):
@@ -36,3 +36,9 @@ class ScannerTests(unittest.TestCase):
   component=_Component('Imported assembly')
   rows,_=scan_design(_Design([_Occurrence(component, _NonLeafChildren())]),[])
   self.assertEqual([(row.component_name, row.quantity) for row in rows],[('Imported assembly',1)])
+ def test_empty_all_occurrences_falls_back_to_root_occurrences(self):
+  from FusionConfigurableBOM.fusion.assembly_scanner import scan_design
+  component=_Component('Direct occurrence')
+  design=_Design([]); design.rootComponent.occurrences=[_Occurrence(component)]
+  rows,_=scan_design(design,[])
+  self.assertEqual([(row.component_name, row.quantity) for row in rows],[('Direct occurrence',1)])
