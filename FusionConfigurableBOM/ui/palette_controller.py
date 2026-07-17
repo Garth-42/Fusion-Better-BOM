@@ -68,7 +68,11 @@ class PaletteController:
             elif action == 'delete_view':
                 if len(config.views) <= 1 or message['view_id'] in ('general', 'purchasing_demo'): raise ValueError('Default formats cannot be deleted.')
                 config.views[:] = [v for v in config.views if v.view_id != message['view_id']]; self.store.save(design.rootComponent, config)
-            self._send_state(palette, config, message.get('view_id'))
+            # A cell save originates from the live input element. Returning a full
+            # state redraw for every keystroke would replace that element, steal
+            # focus, and prevent the remaining value from being saved.
+            if action != 'save_cell':
+                self._send_state(palette, config, message.get('view_id'))
             self.send(palette, {'type':'status','message':'Saved.'})
         except Exception as exc: self.send(palette, {'type':'error','message':str(exc)})
     def _apply_config(self, config, raw, renamed_fields=()):
