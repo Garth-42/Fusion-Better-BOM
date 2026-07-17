@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "profile_id": "mouser_forte_csv",
+  "profile_version": "1.0.0",
+  "supplier_id": "mouser",
+  "display_name": "Mouser FORTE Import",
+  "capability": "mapped_bom_upload",
+  "file_extension": ".csv",
+  "encoding": "utf-8-sig",
+  "delimiter": ",",
+  "line_ending": "crlf",
+  "include_header": true,
+  "columns": [
+    {
+      "header": "Mouser Part Number",
+      "source": "supplier_part_number",
+      "required": false
+    },
+    {
+      "header": "Manufacturer Part Number",
+      "source": "manufacturer_part_number",
+      "required": false
+    },
+    {
+      "header": "Quantity",
+      "source": "order_units",
+      "required": true
+    },
+    {
+      "header": "Customer Part Number",
+      "source": "internal_part_number",
+      "required": false
+    },
+    {
+      "header": "Description",
+      "source": "description",
+      "required": false
+    }
+  ],
+  "verification": {
+    "status": "verified",
+    "verified_date": "2026-07-16",
+    "source": "https://www.mouser.com/bomtool/",
+    "notes": "FORTE spreadsheet import verified; column mapping is flexible."
+  }
+}
