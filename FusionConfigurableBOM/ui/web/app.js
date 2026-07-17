@@ -218,6 +218,7 @@ function saveConfig() {
 }
 
 $('refresh').onclick = () => { status('Scanning assembly…'); send({ action: 'refresh' }); };
+$('saveDesign').onclick = () => { status('Saving Fusion design…'); send({ action: 'save_design' }); };
 $('copy').onclick = copyTable;
 $('thead').onclick = (event) => {
   const sort = event.target.dataset.sort;

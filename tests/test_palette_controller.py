@@ -128,6 +128,26 @@ class PaletteControllerTests(unittest.TestCase):
         copy_text.assert_called_once_with('Qty\tPart\r\n1\tBracket')
         self.assertEqual({'type': 'copy_result', 'copied': True, 'row_count': 1}, responses[0])
 
+    def test_save_design_persists_the_active_fusion_document(self):
+        class Document:
+            def __init__(self):
+                self.descriptions = []
+
+            def save(self, description):
+                self.descriptions.append(description)
+                return True
+
+        document = Document()
+        app = type('App', (), {'activeDocument': document})()
+        controller = PaletteController(app)
+        responses = []
+        controller.send = lambda palette, payload: responses.append(payload)
+
+        controller.receive(None, json.dumps({'action': 'save_design'}))
+
+        self.assertEqual(['Saved Configurable BOM changes.'], document.descriptions)
+        self.assertEqual([{'type': 'status', 'message': 'Design saved.'}], responses)
+
     def test_renaming_a_custom_attribute_migrates_cached_component_values(self):
         root = object()
         app = type('App', (), {'activeProduct': type('Product', (), {'rootComponent': root})()})()

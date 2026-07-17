@@ -34,6 +34,7 @@ class PaletteController:
         try:
             message = json.loads(raw); action = message['action']
             if action == 'refresh': return self.refresh(palette)
+            if action == 'save_design': return self._save_design(palette)
             if action == 'copy_table':
                 try:
                     copy_text(message['tsv'])
@@ -75,6 +76,13 @@ class PaletteController:
                 self._send_state(palette, config, message.get('view_id'))
             self.send(palette, {'type':'status','message':'Saved.'})
         except Exception as exc: self.send(palette, {'type':'error','message':str(exc)})
+    def _save_design(self, palette):
+        document = getattr(self.app, 'activeDocument', None)
+        if not document:
+            raise ValueError('Open a Fusion design before saving BOM changes.')
+        if not document.save('Saved Configurable BOM changes.'):
+            raise RuntimeError('Fusion could not save the active design.')
+        self.send(palette, {'type': 'status', 'message': 'Design saved.'})
     def _apply_config(self, config, raw, renamed_fields=()):
         from ..persistence.configuration_store import from_dict
         parsed = from_dict(raw)
