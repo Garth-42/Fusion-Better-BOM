@@ -39,3 +39,25 @@ class PaletteControllerTests(unittest.TestCase):
         state = next(response for response in responses if response['type'] == 'state')
         self.assertEqual('Acme', state['table']['rows'][0]['values']['manufacturer'])
 
+    def test_refresh_action_scans_the_design_and_sends_rows(self):
+        root = object()
+        app = type('App', (), {'activeProduct': type('Product', (), {'rootComponent': root})()})()
+        controller = PaletteController(app)
+        controller.store = FakeStore(default_configuration())
+        responses = []
+        controller.send = lambda palette, payload: responses.append(payload)
+
+        scanned_rows = [ConceptBomRow('row_1', 'Bracket', 2)]
+        with patch('FusionConfigurableBOM.ui.palette_controller.scan_design',
+                   return_value=(scanned_rows, {'row_1': object()})) as scan_design:
+            controller.receive(None, json.dumps({'action': 'refresh'}))
+
+        scan_design.assert_called_once()
+        self.assertEqual(scanned_rows, controller.rows)
+        state = next(response for response in responses if response['type'] == 'state')
+        self.assertEqual(1, len(state['table']['rows']))
+        self.assertEqual('Bracket', state['table']['rows'][0]['values']['component_name'])
+        # A refresh must not report "Saved." — it only ever sends scanned state.
+        self.assertFalse(any(response['type'] == 'status' and response['message'] == 'Saved.'
+                             for response in responses))
+
