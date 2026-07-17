@@ -27,8 +27,9 @@ class PaletteController:
         except Exception as exc: self.send(palette, {'type':'error','message':str(exc)})
     def receive(self, palette, raw):
         try:
-            message = json.loads(raw); design = self.app.activeProduct; config = self.store.load(design.rootComponent)
-            action = message['action']
+            message = json.loads(raw); action = message['action']
+            if action == 'refresh': return self.refresh(palette)
+            design = self.app.activeProduct; config = self.store.load(design.rootComponent)
             if action == 'save_cell':
                 component = self.components[message['row_id']]
                 if getattr(component, 'isReferencedComponent', False): raise ValueError('Linked components are read-only; open the source design to edit.')
