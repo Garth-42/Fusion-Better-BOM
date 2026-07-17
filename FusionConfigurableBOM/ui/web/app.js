@@ -4,6 +4,7 @@ const state = { config: null, table: null };
 const $ = (id) => document.getElementById(id);
 
 function send(message) {
+  if (state.table && !message.view_id) message.view_id = state.table.view_id;
   adsk.fusionSendData('fusionBomMessage', JSON.stringify(message));
 }
 
