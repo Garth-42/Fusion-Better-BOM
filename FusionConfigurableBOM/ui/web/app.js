@@ -302,7 +302,7 @@ function saveConfig() {
   send({ action: 'save_config', config: state.config, renamed_fields: renamedFields });
 }
 
-$('refresh').onclick = () => { status('Scanning assembly…'); send({ action: 'refresh' }); };
+$('refresh').onclick = () => { status('Scanning assembly…'); send({ action: 'refresh', force: true }); };
 $('saveDesign').onclick = () => { clearTimeout(autoSaveTimer); status('Saving Fusion design…'); send({ action: 'save_design' }); };
 $('copy').onclick = copyTable;
 $('thead').onclick = (event) => {
