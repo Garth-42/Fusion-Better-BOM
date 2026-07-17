@@ -1,0 +1,11 @@
+{
+  "autodeskProduct": "Fusion360",
+  "type": "addin",
+  "id": "com.company.fusion_configurable_bom",
+  "author": "Fusion Configurable BOM",
+  "description": "A custom, configurable BOM concept validator.",
+  "version": "0.1.0",
+  "runOnStartup": false,
+  "supportedOS": "mac|windows",
+  "editEnabled": true
+}

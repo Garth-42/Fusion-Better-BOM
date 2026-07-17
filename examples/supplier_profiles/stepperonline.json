@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "profile_id": "stepperonline_order_worksheet",
+  "profile_version": "1.0.0",
+  "supplier_id": "stepperonline",
+  "display_name": "StepperOnline Order Worksheet",
+  "capability": "ordering_worksheet",
+  "file_extension": ".csv",
+  "encoding": "utf-8-sig",
+  "delimiter": ",",
+  "line_ending": "crlf",
+  "include_header": true,
+  "columns": [
+    {
+      "header": "StepperOnline SKU",
+      "source": "supplier_part_number",
+      "required": true
+    },
+    {
+      "header": "Quantity",
+      "source": "order_units",
+      "required": true
+    },
+    {
+      "header": "Customer Reference",
+      "source": "internal_part_number",
+      "required": false
+    },
+    {
+      "header": "Description",
+      "source": "description",
+      "required": false
+    },
+    {
+      "header": "Product URL",
+      "source": "product_url",
+      "required": false
+    },
+    {
+      "header": "Variant Summary",
+      "source": "variant_summary",
+      "required": false
+    },
+    {
+      "header": "Notes",
+      "source": "supplier_notes",
+      "required": false
+    }
+  ],
+  "verification": {
+    "status": "unverified",
+    "verified_date": null,
+    "source": "https://www.omc-stepperonline.com/",
+    "notes": "Worksheet only; no public CSV/BOM upload format verified."
+  }
+}
