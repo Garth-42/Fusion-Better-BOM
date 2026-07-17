@@ -20,7 +20,7 @@ def _same_component(a, b):
     return a is b
 
 class PaletteController:
-    def __init__(self, app): self.app, self.store, self.rows, self.components, self._auto_save_hinted, self._on_palette_created = app, FusionConfigurationStore(), [], {}, False, None
+    def __init__(self, app): self.app, self.store, self.rows, self.components, self._auto_save_hinted, self._on_palette_created, self._rows_structure = app, FusionConfigurationStore(), [], {}, False, None, 'flat'
     def on_palette_created(self, hook):
         # install() registers the HTML message wiring here so it runs whenever the
         # palette is (re)built inside show(), not once at add-in load.
@@ -67,6 +67,7 @@ class PaletteController:
             # Only do it for an explicit Refresh; edit operations render from this cache.
             # The active view's structure picks a flat leaf scan or a structured tree walk.
             self.rows, self.components = self._scan(design, config, view)
+            self._rows_structure = getattr(view, 'structure', 'flat')
             self._send_state(palette, config, view.view_id)
         except Exception as exc: self.send(palette, {'type':'error','message':str(exc)})
     def _view(self, config, view_id):
@@ -131,6 +132,7 @@ class PaletteController:
             # state redraw for every keystroke would replace that element, steal
             # focus, and prevent the remaining value from being saved.
             if action != 'save_cell':
+                self._resync_rows_structure(design, config, message.get('view_id'))
                 self._send_state(palette, config, message.get('view_id'))
             self.send(palette, {'type':'status','message':'Saved.'})
         except Exception as exc: self.send(palette, {'type':'error','message':str(exc)})
@@ -184,6 +186,17 @@ class PaletteController:
                 if component and not row.linked:
                     rename_value(component, old_id, new_id)
         config.fields, config.views = parsed.fields, parsed.views
+    def _resync_rows_structure(self, design, config, view_id):
+        # The format editor can flip a view between flat and hierarchical. When the
+        # view now on screen was scanned in the other shape (flat leaves vs tree
+        # nodes), the cached rows no longer fit, so re-scan before sending state --
+        # otherwise a newly hierarchical view would render its flat rows as a plain
+        # list with a blank Total Qty and no tree (and vice versa).
+        view = next((item for item in config.views if item.view_id == view_id), config.views[0])
+        if getattr(view, 'structure', 'flat') == self._rows_structure:
+            return
+        self.rows, self.components = self._scan(design, config, view)
+        self._rows_structure = getattr(view, 'structure', 'flat')
     def _config(self, config):
         from ..domain.models import configuration_to_dict
         return configuration_to_dict(config)

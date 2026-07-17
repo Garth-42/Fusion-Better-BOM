@@ -226,6 +226,57 @@ class PaletteControllerTests(unittest.TestCase):
         self.assertEqual('Acme', controller.rows[0].custom_values['manufacturer'])
         self.assertEqual('Acme', controller.rows[1].custom_values['manufacturer'])
 
+    def test_changing_the_active_view_to_hierarchical_rescans_with_the_tree_scan(self):
+        # Flipping the on-screen format to hierarchical in the editor must re-scan so
+        # the cached flat rows are replaced with tree nodes before state is sent;
+        # otherwise the table would render flat rows under a hierarchical header.
+        root = object()
+        app = type('App', (), {'activeProduct': type('Product', (), {'rootComponent': root})()})()
+        controller = PaletteController(app)
+        controller.store = FakeStore(default_configuration())
+        controller.rows = [ConceptBomRow('row_1', 'Bracket', 1)]
+        controller.components = {'row_1': object()}
+        controller._rows_structure = 'flat'
+        controller.send = lambda palette, payload: None
+        raw_config = configuration_to_dict(default_configuration())
+        for view in raw_config['views']:
+            if view['view_id'] == 'general':
+                view['structure'] = 'hierarchical'
+
+        with patch('FusionConfigurableBOM.ui.palette_controller.scan_design_hierarchical',
+                   return_value=([], {})) as hierarchical, \
+             patch('FusionConfigurableBOM.ui.palette_controller.scan_design',
+                   return_value=([], {})) as flat:
+            controller.receive(None, json.dumps({
+                'action': 'save_config', 'config': raw_config, 'view_id': 'general',
+            }))
+
+        hierarchical.assert_called_once()
+        flat.assert_not_called()
+        self.assertEqual('hierarchical', controller._rows_structure)
+
+    def test_editing_a_flat_view_does_not_trigger_a_rescan(self):
+        # A config edit that leaves the on-screen structure alone must not pay for
+        # an assembly re-scan; the cached rows still fit.
+        root = object()
+        app = type('App', (), {'activeProduct': type('Product', (), {'rootComponent': root})()})()
+        controller = PaletteController(app)
+        controller.store = FakeStore(default_configuration())
+        controller.rows = [ConceptBomRow('row_1', 'Bracket', 1)]
+        controller.components = {'row_1': object()}
+        controller._rows_structure = 'flat'
+        controller.send = lambda palette, payload: None
+
+        with patch('FusionConfigurableBOM.ui.palette_controller.scan_design_hierarchical') as hierarchical, \
+             patch('FusionConfigurableBOM.ui.palette_controller.scan_design') as flat:
+            controller.receive(None, json.dumps({
+                'action': 'save_config', 'config': configuration_to_dict(default_configuration()),
+                'view_id': 'general',
+            }))
+
+        hierarchical.assert_not_called()
+        flat.assert_not_called()
+
     def test_refresh_action_scans_the_design_and_sends_rows(self):
         root = object()
         app = type('App', (), {'activeProduct': type('Product', (), {'rootComponent': root})()})()

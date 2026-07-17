@@ -126,15 +126,20 @@ Until then a hierarchical view lists all nodes flat, with correct quantities.
   flat mode keeps today's per-column sort. Sibling-scoped sort is a future option.
 - TSV copy walks the visible rows in tree order and indents the Component value
   two spaces per level, so the pasted outline keeps its shape.
-- The view picker re-scans when switching between flat and hierarchical views; no
-  separate mode control. Duplicating/"Save as" from a hierarchical view now keeps
-  its structure.
+- The view picker re-scans when switching between flat and hierarchical views.
+  The format editor also carries a **Structure** selector so any format can be
+  flipped between flat and hierarchical; changing the on-screen format's
+  structure re-scans so the table redraws in the new shape. Duplicating/"Save as"
+  from a hierarchical view keeps its structure.
+- A design configured before the hierarchical "Structured BOM" default shipped
+  gains it on load: `_ensure_default_views` restores any missing built-in format
+  (migration alone only bumps the schema version), so the option always appears.
 - Verified headless (DOM-stubbed): expand/collapse, caret placement and flip,
   descendant hiding, indented TSV, and no change to flat rendering.
 
 Deferred UI polish: live-updating sibling cells for a shared definition on cell
-edit (values are already correct on the next render/refresh); a structure toggle
-in the format editor; sibling-scoped column sort.
+edit (values are already correct on the next render/refresh); sibling-scoped
+column sort.
 
 ### 6. Docs  — DONE
 
