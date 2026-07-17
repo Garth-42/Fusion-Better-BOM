@@ -29,6 +29,11 @@ def _is_linked(component):
     # Document references are the conservative public indicator for externally linked definitions.
     return bool(getattr(component, 'isReferencedComponent', False))
 
+def _component_key(component):
+    """Use Fusion's persistent entity identity; Python proxy objects may differ per occurrence."""
+    token = getattr(component, 'entityToken', None)
+    return ('entity_token', token) if token else ('object_id', id(component))
+
 def scan_design(design, field_ids):
     grouped = {}
     root = design.rootComponent
@@ -52,7 +57,9 @@ def scan_design(design, field_ids):
         bom_occurrences = [type('RootOccurrence', (), {'component': root})()]
     for occurrence in bom_occurrences:
         component = occurrence.component
-        key = id(component)  # Stable for this scan; never aggregate by display name.
+        # Fusion can hand back a new Python proxy for the same component definition
+        # on each occurrence. entityToken keeps those occurrences in one BOM row.
+        key = _component_key(component)
         entry = grouped.setdefault(key, {'component': component, 'quantity': 0})
         entry['quantity'] += 1
     rows = []

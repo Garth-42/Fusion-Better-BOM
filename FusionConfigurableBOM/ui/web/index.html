@@ -5,29 +5,61 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <header>
+  <header class="toolbar">
+    <label class="format-picker" for="view">Format</label>
     <select id="view" aria-label="BOM table format"></select>
-    <button id="refresh" type="button">Refresh</button>
-    <button id="copy" type="button">Copy Table</button>
-    <button id="edit" type="button">Edit Table Formats</button>
+    <div class="toolbar-actions">
+      <button id="refresh" type="button">Refresh</button>
+      <button id="copy" type="button">Copy table</button>
+      <button id="edit" class="primary" type="button">Edit formats</button>
+    </div>
   </header>
   <p id="status" role="status">Ready. Click Refresh to scan the active design.</p>
   <main>
+    <p id="tableHint" class="table-hint" hidden><span class="edit-key" aria-hidden="true">✎</span> Cells marked with a pencil can be edited. Changes are saved when you leave the cell.</p>
     <p id="empty" hidden>No visible component occurrences were found in this assembly.</p>
     <table><thead id="thead"></thead><tbody id="tbody"></tbody></table>
   </main>
   <dialog id="editor">
-    <h2>Table formats</h2>
-    <label>Format <select id="editView"></select></label>
-    <button id="duplicate" type="button">Duplicate</button>
-    <button id="delete" type="button">Delete</button>
-    <label>Name <input id="viewName"></label>
-    <section id="columns"></section>
-    <label>Add existing field <select id="field"></select></label>
-    <button id="addColumn" type="button">Add field</button>
-    <button id="addField" type="button">Create custom field</button>
-    <button id="saveConfig" type="button">Save format changes</button>
-    <button id="close" type="button">Close</button>
+    <form method="dialog">
+      <div class="dialog-heading">
+        <div>
+          <p class="eyebrow">BOM setup</p>
+          <h2>Table formats</h2>
+          <p class="dialog-description">Choose which fields appear and arrange the column order.</p>
+        </div>
+        <button id="close" class="icon-button" type="submit" aria-label="Close format editor" title="Close">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"/></svg>
+        </button>
+      </div>
+      <label class="control-label" for="editView">Editing format</label>
+      <div class="format-actions">
+        <select id="editView"></select>
+        <button id="saveAs" type="button">Save as…</button>
+        <button id="delete" class="danger" type="button">Delete</button>
+      </div>
+      <section class="editor-section">
+        <div class="section-heading"><h3>Columns</h3><span>Use the arrows to reorder</span></div>
+        <section id="columns"></section>
+      </section>
+      <section class="editor-section">
+        <div class="section-heading"><h3>Custom attributes</h3><span>Attribute keys are shared by every table format</span></div>
+        <p class="section-description">The display name is used when adding a field. Column names can still be changed independently above. Renaming an attribute key moves values for editable components in this assembly.</p>
+        <section id="attributes"></section>
+      </section>
+      <section class="editor-section add-fields">
+        <label class="control-label" for="field">Add a field</label>
+        <div class="format-actions">
+          <select id="field"></select>
+          <button id="addColumn" type="button">Add field</button>
+          <button id="addField" type="button">New custom field</button>
+        </div>
+      </section>
+      <div class="dialog-footer">
+        <button id="cancel" type="submit">Cancel</button>
+        <button id="saveConfig" class="primary" type="button">Save changes</button>
+      </div>
+    </form>
   </dialog>
   <script src="app.js"></script>
 </body>
