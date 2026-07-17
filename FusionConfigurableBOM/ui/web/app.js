@@ -237,6 +237,8 @@ function renderEditor() {
     .join('');
   $('editView').value = view.view_id;
   $('editStructure').value = view.structure || 'flat';
+  $('editRollup').value = view.rollup_by || 'component';
+  $('editRollup').disabled = (view.structure || 'flat') === 'hierarchical';
   $('field').innerHTML = state.config.fields
     .map((field) => `<option value="${escape(field.field_id)}">${escape(field.default_label)}</option>`)
     .join('');
@@ -260,6 +262,7 @@ function renderEditor() {
 function collectEditorChanges() {
   const view = currentView();
   view.structure = $('editStructure').value;
+  view.rollup_by = $('editRollup').value;
   document.querySelectorAll('.header').forEach((element) => {
     view.columns[element.dataset.index].header = element.value;
   });
@@ -299,7 +302,7 @@ function saveConfig() {
   send({ action: 'save_config', config: state.config, renamed_fields: renamedFields });
 }
 
-$('refresh').onclick = () => { status('Scanning assembly…'); send({ action: 'refresh' }); };
+$('refresh').onclick = () => { status('Scanning assembly…'); send({ action: 'refresh', force: true }); };
 $('saveDesign').onclick = () => { clearTimeout(autoSaveTimer); status('Saving Fusion design…'); send({ action: 'save_design' }); };
 $('copy').onclick = copyTable;
 $('thead').onclick = (event) => {
