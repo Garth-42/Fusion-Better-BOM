@@ -38,4 +38,9 @@ class FusionConfigurationStore:
         attribute = root.attributes.itemByName(CONFIG_ATTRIBUTE_GROUP, CONFIG_ATTRIBUTE_NAME)
         return default_configuration() if not attribute else loads(attribute.value)
     def save(self, root, config):
-        root.attributes.add(CONFIG_ATTRIBUTE_GROUP, CONFIG_ATTRIBUTE_NAME, dumps(config))
+        value = dumps(config)
+        attribute = root.attributes.itemByName(CONFIG_ATTRIBUTE_GROUP, CONFIG_ATTRIBUTE_NAME)
+        if attribute:
+            attribute.value = value
+        else:
+            root.attributes.add(CONFIG_ATTRIBUTE_GROUP, CONFIG_ATTRIBUTE_NAME, value)
