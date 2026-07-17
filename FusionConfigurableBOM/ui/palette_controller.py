@@ -85,15 +85,27 @@ class PaletteController:
         if getattr(view, 'structure', 'flat') == 'hierarchical':
             return scan_design_hierarchical(design, field_ids)
         return scan_design(design, field_ids, getattr(view, 'rollup_by', 'component'))
+    def _root_identity(self, design):
+        # Fusion hands back a brand-new Python proxy on every `rootComponent`
+        # (and `activeProduct`) access, so id() of that proxy changes call to
+        # call and can never key a cache that must survive across format
+        # switches. The persistent entityToken is stable for the life of the
+        # design, so cache on it and fall back to object identity only for the
+        # test doubles / proxies that expose no token.
+        root = design.rootComponent
+        token = getattr(root, 'entityToken', None)
+        return ('entity_token', token) if token else ('object_id', id(root))
     def _scan_cached(self, design, config, view):
         # Cache only data that is independent of table columns and headers. A
         # format switch can then redraw from the same parsed BOM; explicit
         # Refresh and any value/configuration edit invalidate the cache.
-        key = (id(design.rootComponent), tuple(field.field_id for field in config.fields),
+        root_identity = self._root_identity(design)
+        field_ids = tuple(field.field_id for field in config.fields)
+        key = (root_identity, field_ids,
                getattr(view, 'structure', 'flat'), getattr(view, 'rollup_by', 'component'))
-        snapshot_key = (id(design.rootComponent), tuple(field.field_id for field in config.fields))
+        snapshot_key = (root_identity, field_ids)
         if self._snapshot_key != snapshot_key:
-            self._snapshot = scan_design_snapshot(design, [field.field_id for field in config.fields])
+            self._snapshot = scan_design_snapshot(design, list(field_ids))
             self._snapshot_key = snapshot_key
             self._scan_cache.clear()
         if key not in self._scan_cache:
