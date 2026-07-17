@@ -20,16 +20,36 @@ def _same_component(a, b):
     return a is b
 
 class PaletteController:
-    def __init__(self, app): self.app, self.store, self.rows, self.components, self._auto_save_hinted = app, FusionConfigurationStore(), [], {}, False
+    def __init__(self, app): self.app, self.store, self.rows, self.components, self._auto_save_hinted, self._on_palette_created = app, FusionConfigurationStore(), [], {}, False, None
+    def on_palette_created(self, hook):
+        # install() registers the HTML message wiring here so it runs whenever the
+        # palette is (re)built inside show(), not once at add-in load.
+        self._on_palette_created = hook
     def show(self):
         import adsk.core
-        path = os.path.join(os.path.dirname(__file__), 'web', 'index.html')
-        palette = self.app.userInterface.palettes.itemById(PALETTE_ID)
+        ui = self.app.userInterface
+        palette = ui.palettes.itemById(PALETTE_ID)
+        # Fusion discards palettes when the user switches workspaces; a stale
+        # handle reports isValid == False and has to be rebuilt from scratch.
+        if palette and not getattr(palette, 'isValid', True):
+            palette = None
         if not palette:
-            palette = self.app.userInterface.palettes.add(PALETTE_ID, 'Configurable BOM', 'file:///' + path.replace('\\','/'), True, True, True, 900, 600)
-            # A floating palette is a separate Fusion window, so it opens above
-            # the Browser/feature tree instead of being obscured by that panel.
+            path = os.path.join(os.path.dirname(__file__), 'web', 'index.html')
+            # Build the palette hidden, float it, then reveal it last (below).
+            # Creating the window on demand -- when the user first opens the BOM --
+            # rather than eagerly at add-in load is what makes its first appearance
+            # a fresh floating window that stacks above the Browser and object tree.
+            # A palette created at load parks behind those panels, and because the
+            # API exposes no raise/z-order call, no later show/hide lifts it out.
+            palette = ui.palettes.add(PALETTE_ID, 'Configurable BOM', 'file:///' + path.replace('\\', '/'), False, True, True, 900, 600, True)
             palette.dockingState = adsk.core.PaletteDockingStates.PaletteDockStateFloating
+            if self._on_palette_created:
+                self._on_palette_created(palette)
+        elif palette.isVisible:
+            # Re-opening a palette that is already up but buried behind the tree or
+            # the collapsed Comments/Browser panels: hiding it first, then showing
+            # it again below, re-stacks the floating window back on top.
+            palette.isVisible = False
         palette.isVisible = True
         return palette
     def refresh(self, palette, view_id=None):
