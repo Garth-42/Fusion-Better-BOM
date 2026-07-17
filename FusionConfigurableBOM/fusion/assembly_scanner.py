@@ -40,14 +40,48 @@ def _component_key(component):
     token = getattr(component, 'entityToken', None)
     return ('entity_token', token) if token else ('object_id', id(component))
 
-def scan_design(design, field_ids):
+def _flat_occurrences(root, include_parent=False):
+    """Return visible occurrences with their immediate parent context.
+
+    Most flat scans use Fusion's `allOccurrences`, which is the established and
+    most reliable API traversal for a flattened BOM. Only the subassembly
+    roll-up needs parent context, so only that mode walks `occurrences`.
+    """
+    if not include_parent:
+        found = [(occurrence, None) for occurrence in _visible(getattr(root, 'allOccurrences', None))]
+        if found:
+            return found
+        return [(occurrence, None) for occurrence in _visible(_root_descendants(root))]
+    found = []
+    def walk(occurrences, parent_component=None):
+        for occurrence in _visible(occurrences):
+            found.append((occurrence, parent_component))
+            walk(getattr(occurrence, 'childOccurrences', None), occurrence.component)
+    walk(getattr(root, 'occurrences', None))
+    if not found:
+        found = [(occurrence, None) for occurrence in _visible(_root_descendants(root))]
+    return found
+
+def _rollup_key(component, parent_component, values, rollup_by):
+    # Attribute values are deliberately included in every roll-up signature.
+    # Thus two parts with the same part number but different configured metadata
+    # remain separate rows and every value can be truthfully shown in its column.
+    attributes = tuple(sorted(values.items()))
+    component_key = _component_key(component)
+    if rollup_by == 'part_number':
+        part_number = (getattr(component, 'partNumber', None) or '').strip()
+        identity = ('part_number', part_number) if part_number else component_key
+    elif rollup_by == 'subassembly':
+        identity = ('subassembly', _component_key(parent_component) if parent_component else None, component_key)
+    else:
+        identity = component_key
+    return identity, attributes
+
+def scan_design(design, field_ids, rollup_by='component'):
     grouped = {}
     root = design.rootComponent
-    occurrences = [occurrence for occurrence in _items(root.allOccurrences)
-                   if not getattr(occurrence, 'isSuppressed', False)]
-    if not occurrences:
-        occurrences = [occurrence for occurrence in _root_descendants(root)
-                       if not getattr(occurrence, 'isSuppressed', False)]
+    occurrence_contexts = _flat_occurrences(root, rollup_by == 'subassembly')
+    occurrences = [occurrence for occurrence, _parent in occurrence_contexts]
     # A strict leaf scan is the normal BOM behavior. Some Fusion designs use
     # components that contain both bodies and child occurrences, which means
     # there are no strict leaves even though the browser visibly contains parts.
@@ -60,25 +94,29 @@ def scan_design(design, field_ids):
         bom_occurrences = occurrences
     if not bom_occurrences and _has_bodies(root):
         # A single-part design can put bodies directly under the root component.
-        bom_occurrences = [type('RootOccurrence', (), {'component': root})()]
-    for occurrence in bom_occurrences:
+        bom_contexts = [(type('RootOccurrence', (), {'component': root})(), None)]
+    else:
+        bom_contexts = [(occurrence, parent) for occurrence, parent in occurrence_contexts if occurrence in bom_occurrences]
+    for occurrence, parent_component in bom_contexts:
         component = occurrence.component
         # Fusion can hand back a new Python proxy for the same component definition
         # on each occurrence. entityToken keeps those occurrences in one BOM row.
-        key = _component_key(component)
-        entry = grouped.setdefault(key, {'component': component, 'quantity': 0})
+        values = _shared_values(root, component, field_ids)
+        key = _rollup_key(component, parent_component, values, rollup_by)
+        entry = grouped.setdefault(key, {'component': component, 'parent_component': parent_component,
+                                         'values': values, 'quantity': 0})
         entry['quantity'] += 1
     rows = []
     for index, entry in enumerate(grouped.values(), 1):
         component = entry['component']
         # Root-stored values are authoritative (they persist with the active
         # design); fall back to any legacy value written on the component itself.
-        values = read_component_values(component, field_ids)
-        values.update(read_root_values(root, component, field_ids))
+        values = entry['values']
         rows.append(ConceptBomRow(f'row_{index}', component.name, entry['quantity'],
             getattr(component, 'partNumber', None), getattr(component, 'description', None),
             getattr(component, 'material', None).name if getattr(component, 'material', None) else None,
-            _is_linked(component), values))
+            _is_linked(component), values,
+            getattr(entry['parent_component'], 'name', None)))
     return rows, {f'row_{i}': entry['component'] for i, entry in enumerate(grouped.values(), 1)}
 
 def _shared_values(root, component, field_ids):
@@ -88,6 +126,31 @@ def _shared_values(root, component, field_ids):
     values = read_component_values(component, field_ids)
     values.update(read_root_values(root, component, field_ids))
     return values
+
+def _tree_signature(occurrence):
+    """Return a stable shape signature for an occurrence and its descendants.
+
+    Repeated sibling assemblies can only be represented by one rolled-up tree
+    node when their contents are identical. Grouping solely by component
+    definition loses the children that only occur in the second or third
+    instance of an assembly. The signature keeps equivalent subtrees together
+    while preserving distinct assemblies and all of their assigned parts.
+    """
+    children = _visible(getattr(occurrence, 'childOccurrences', None))
+    return (_component_key(occurrence.component),
+            tuple(sorted((_tree_signature(child) for child in children), key=repr)))
+
+def _hierarchical_root_occurrences(root):
+    """Use the root tree when available, with a visible-data fallback.
+
+    `root.occurrences` is normally authoritative. Some imported designs expose
+    their occurrences only through `allOccurrences`; retaining those rows at
+    level zero is preferable to returning an empty hierarchical BOM.
+    """
+    occurrences = _visible(getattr(root, 'occurrences', None))
+    if occurrences:
+        return occurrences
+    return _visible(getattr(root, 'allOccurrences', None))
 
 def scan_design_hierarchical(design, field_ids):
     """Walk the assembly tree into structured BOM nodes.
@@ -102,13 +165,15 @@ def scan_design_hierarchical(design, field_ids):
     root = design.rootComponent
     nodes, components, counter = [], {}, [0]
     def walk(occurrences, parent_id, level, parent_rollup):
-        # Aggregate by component definition among these siblings only. Fusion can
-        # hand back a new proxy per occurrence, so entityToken (via _component_key)
-        # keeps repeated instances of one definition on a single node.
+        # Aggregate equivalent sibling subtrees only. Fusion can hand back a new
+        # proxy per occurrence, so entityToken keeps same definitions together,
+        # but child signatures prevent parts from a non-identical assembly
+        # instance being silently omitted.
         grouped = {}
         for occurrence in occurrences:
             component = occurrence.component
-            entry = grouped.setdefault(_component_key(component),
+            key = _tree_signature(occurrence)
+            entry = grouped.setdefault(key,
                 {'occurrence': occurrence, 'component': component, 'quantity': 0})
             entry['quantity'] += 1
         for entry in grouped.values():
@@ -125,5 +190,5 @@ def scan_design_hierarchical(design, field_ids):
             components[row_id] = component
             if children:
                 walk(children, row_id, level + 1, rollup)
-    walk(_visible(getattr(root, 'occurrences', None)), None, 0, 1)
+    walk(_hierarchical_root_occurrences(root), None, 0, 1)
     return nodes, components

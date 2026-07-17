@@ -237,6 +237,8 @@ function renderEditor() {
     .join('');
   $('editView').value = view.view_id;
   $('editStructure').value = view.structure || 'flat';
+  $('editRollup').value = view.rollup_by || 'component';
+  $('editRollup').disabled = (view.structure || 'flat') === 'hierarchical';
   $('field').innerHTML = state.config.fields
     .map((field) => `<option value="${escape(field.field_id)}">${escape(field.default_label)}</option>`)
     .join('');
@@ -260,6 +262,7 @@ function renderEditor() {
 function collectEditorChanges() {
   const view = currentView();
   view.structure = $('editStructure').value;
+  view.rollup_by = $('editRollup').value;
   document.querySelectorAll('.header').forEach((element) => {
     view.columns[element.dataset.index].header = element.value;
   });
