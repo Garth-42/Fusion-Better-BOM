@@ -92,18 +92,30 @@ class HierarchicalBomNode:
 Note: until step 4 routes the scan by mode, selecting "Structured BOM" renders
 flat scan data (no tree, blank Total Qty). The schema and storage are ready.
 
-### 3. Table builder passthrough
+### 3. Table builder passthrough  — DONE
 
-- Extend `build_table` so a hierarchical view also emits `level`, `parent_id`,
-  `is_assembly`, and `total_quantity` per row.
-- Expose `total_quantity` as a selectable builtin column.
+- `build_table` tags every table with the view's `structure`, and for a
+  hierarchical view emits `level`, `parent_id`, and `is_assembly` per row.
+  `total_quantity` rides the normal builtin-column path (default '' for flat
+  rows) and is a column in the default Structured BOM view.
+- Tests: flat views report `structure: flat` and carry no tree metadata;
+  hierarchical views emit levels, parent links, assembly flags, and total qty.
 
-### 4. Controller routing + edit propagation
+### 4. Controller routing + edit propagation  — DONE
 
-- `refresh` chooses `scan_design` vs `scan_design_hierarchical` from the active
-  view's `structure`.
-- `save_cell` propagates an edit to every cached row sharing the same component,
-  since a definition can now appear as several nodes.
+- `refresh(view_id)` resolves the active view and scans with `scan_design` or
+  `scan_design_hierarchical` from its `structure`; state is sent for that view.
+- The web view picker re-scans when the selected view's structure differs from
+  the rendered one (flat leaves vs tree nodes are differently shaped), instead
+  of only re-filtering columns.
+- `save_cell` propagates the edit to every cached row that resolves to the same
+  component (`_same_component` matches by entityToken, identity fallback), so all
+  nodes for one definition stay in sync; a flat scan matches exactly one row.
+- Tests: a hierarchical view routes to the tree scan; one cell edit updates every
+  row sharing a component.
+
+Remaining for the tree to render as a tree: step 5 (indentation, expand/collapse).
+Until then a hierarchical view lists all nodes flat, with correct quantities.
 
 ### 5. UI
 

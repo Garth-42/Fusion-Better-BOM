@@ -1,5 +1,5 @@
 import unittest
-from FusionConfigurableBOM.domain.models import ConceptBomRow, BomTableFormat, ColumnDefinition
+from FusionConfigurableBOM.domain.models import ConceptBomRow, HierarchicalBomNode, BomTableFormat, ColumnDefinition
 from FusionConfigurableBOM.domain.table_builder import build_table
 class TableTests(unittest.TestCase):
  def test_visible_columns_and_attribute_values(self):
@@ -10,6 +10,19 @@ class TableTests(unittest.TestCase):
   view=BomTableFormat('v','V',[ColumnDefinition('builtin','component_name','Component')])
   rows=[ConceptBomRow('a','Bracket',1),ConceptBomRow('b','Bracket',2)]
   self.assertEqual(len(build_table(rows,view)['rows']),2)
+ def test_flat_view_reports_structure_and_omits_tree_metadata(self):
+  view=BomTableFormat('v','V',[ColumnDefinition('builtin','component_name','Component')])
+  table=build_table([ConceptBomRow('a','Bracket',1)],view)
+  self.assertEqual(table['structure'],'flat'); self.assertNotIn('level',table['rows'][0])
+ def test_hierarchical_view_emits_tree_metadata_and_total_quantity(self):
+  view=BomTableFormat('v','V',[ColumnDefinition('builtin','component_name','Component'),ColumnDefinition('builtin','total_quantity','Total')],'hierarchical')
+  parent=HierarchicalBomNode('r1','Gearbox',0,None,2,2,True)
+  child=HierarchicalBomNode('r2','Screw',1,'r1',4,8,False)
+  table=build_table([parent,child],view)
+  self.assertEqual(table['structure'],'hierarchical')
+  self.assertEqual([r['level'] for r in table['rows']],[0,1])
+  self.assertTrue(table['rows'][0]['is_assembly']); self.assertFalse(table['rows'][1]['is_assembly'])
+  self.assertEqual(table['rows'][1]['parent_id'],'r1'); self.assertEqual(table['rows'][1]['values']['total_quantity'],8)
 
 class _Attributes:
  def itemByName(self, group, name): return None

@@ -253,6 +253,13 @@ $('thead').onclick = (event) => {
 };
 $('view').onchange = (event) => {
   const view = state.config.views.find((item) => item.view_id === event.target.value);
+  // Flat and hierarchical views need differently shaped rows (aggregated leaves
+  // vs tree nodes), so switching the BOM structure re-scans in the new mode
+  // instead of just re-filtering columns from the current rows.
+  if ((view.structure || 'flat') !== (state.table.structure || 'flat')) {
+    status('Scanning assembly…');
+    return send({ action: 'refresh', view_id: view.view_id });
+  }
   state.table.columns = view.columns.filter((column) => column.visible);
   state.table.view_id = view.view_id;
   render();

@@ -115,6 +115,45 @@ class PaletteControllerTests(unittest.TestCase):
         self.assertEqual({'manufacturer': 'Acme'},
                          value_store.read_values(root, component, ['manufacturer']))
 
+    def test_refresh_routes_a_hierarchical_view_to_the_tree_scan(self):
+        root = object()
+        app = type('App', (), {'activeProduct': type('Product', (), {'rootComponent': root})()})()
+        controller = PaletteController(app)
+        controller.store = FakeStore(default_configuration())
+        controller.send = lambda palette, payload: None
+
+        with patch('FusionConfigurableBOM.ui.palette_controller.scan_design_hierarchical',
+                   return_value=([], {})) as hierarchical, \
+             patch('FusionConfigurableBOM.ui.palette_controller.scan_design',
+                   return_value=([], {})) as flat:
+            controller.receive(None, json.dumps({'action': 'refresh', 'view_id': 'structured'}))
+
+        hierarchical.assert_called_once()
+        flat.assert_not_called()
+
+    def test_saving_a_cell_propagates_to_every_row_sharing_a_component(self):
+        # A hierarchical scan lists one definition as several nodes; a single edit
+        # must update every cached row for that definition, since values are shared.
+        root = FakeRoot()
+        shared = FakeComponent('screw-token')
+        app = type('App', (), {'activeProduct': type('Product', (), {'rootComponent': root})()})()
+        controller = PaletteController(app)
+        controller.store = FakeStore(default_configuration())
+        controller.rows = [
+            ConceptBomRow('row_1', 'Screw', 2, custom_values={'manufacturer': ''}),
+            ConceptBomRow('row_2', 'Screw', 3, custom_values={'manufacturer': ''}),
+        ]
+        controller.components = {'row_1': shared, 'row_2': shared}
+        controller.send = lambda palette, payload: None
+
+        controller.receive(None, json.dumps({
+            'action': 'save_cell', 'row_id': 'row_1', 'field_id': 'manufacturer',
+            'value': 'Acme', 'view_id': 'structured',
+        }))
+
+        self.assertEqual('Acme', controller.rows[0].custom_values['manufacturer'])
+        self.assertEqual('Acme', controller.rows[1].custom_values['manufacturer'])
+
     def test_refresh_action_scans_the_design_and_sends_rows(self):
         root = object()
         app = type('App', (), {'activeProduct': type('Product', (), {'rootComponent': root})()})()
