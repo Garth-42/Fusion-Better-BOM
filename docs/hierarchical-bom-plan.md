@@ -136,12 +136,14 @@ Deferred UI polish: live-updating sibling cells for a shared definition on cell
 edit (values are already correct on the next render/refresh); a structure toggle
 in the format editor; sibling-scoped column sort.
 
-### 6. Docs
+### 6. Docs  — DONE
 
-- `architecture.md` (remove structured BOM from non-goals; add the per-view mode).
-- `domain-model.md` (add `HierarchicalBomNode`).
-- `README.md` (update known limitations).
-- `manual-fusion-test-plan.md` (hierarchical acceptance checks).
+- `architecture.md`: structured BOM removed from Deliverable 1 non-goals; the
+  per-view hierarchical scan documented in the assembly model.
+- `domain-model.md`: `HierarchicalBomNode` documented alongside the flat model.
+- `README.md`: scan description and known limitations updated for the tree view.
+- `manual-fusion-test-plan.md`: a Structured BOM acceptance checklist added.
+- `CHANGELOG.md`: unreleased entry for the feature and the schema v2 migration.
 
 ## Deferred robustness (documented, not yet handled)
 

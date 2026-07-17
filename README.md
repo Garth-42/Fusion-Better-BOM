@@ -7,7 +7,7 @@ This repository defines a staged Autodesk Fusion add-in project.
 The only current implementation scope is a small **Configurable BOM Concept Validator** that:
 
 - Opens a custom dockable BOM palette.
-- Scans the current assembly into a flattened leaf-component table.
+- Scans the current assembly into a flattened leaf-component table, or a structured (hierarchical) tree as a per-view option.
 - Counts repeated component definitions.
 - Adds editable custom string columns backed by Fusion component Attributes.
 - Lets column headers be renamed without changing stored data.
@@ -36,7 +36,7 @@ The `FusionConfigurableBOM` directory is a Fusion Python add-in. Install it from
 
 ### Known concept-validator limitations
 
-- The BOM is a flattened, leaf-only custom palette; Fusion's native BOM UI is not changed.
+- The BOM renders in a custom palette (a flat leaf table, or a structured tree per view); Fusion's native BOM UI is not changed.
 - Configuration and values persist only through Fusion component Attributes after the design is saved.
 - Linked components are deliberately read-only in their parent assembly.
 - Supplier workflows, CSV, purchasing quantities, overrides, and all roadmap features remain excluded.
