@@ -117,13 +117,24 @@ flat scan data (no tree, blank Total Qty). The schema and storage are ready.
 Remaining for the tree to render as a tree: step 5 (indentation, expand/collapse).
 Until then a hierarchical view lists all nodes flat, with correct quantities.
 
-### 5. UI
+### 5. UI  — DONE
 
-- Render tree rows indented by `level` with expand/collapse per assembly node.
-- Sorting: sibling-scoped or disabled in hierarchical mode (a global sort would
-  break the tree). Flat mode keeps today's global sort.
-- TSV copy: include an indent/level marker so pasted structure stays meaningful.
-- View picker reflects the mode; no separate control.
+- Tree rows indent by `level`; the expand/collapse caret sits on the Component
+  column (first column if a view omits Component). Assembly rows are tinted and
+  bold. Collapsing hides descendants via a parent-chain walk.
+- Sorting is suppressed in hierarchical mode (a global sort would break nesting);
+  flat mode keeps today's per-column sort. Sibling-scoped sort is a future option.
+- TSV copy walks the visible rows in tree order and indents the Component value
+  two spaces per level, so the pasted outline keeps its shape.
+- The view picker re-scans when switching between flat and hierarchical views; no
+  separate mode control. Duplicating/"Save as" from a hierarchical view now keeps
+  its structure.
+- Verified headless (DOM-stubbed): expand/collapse, caret placement and flip,
+  descendant hiding, indented TSV, and no change to flat rendering.
+
+Deferred UI polish: live-updating sibling cells for a shared definition on cell
+edit (values are already correct on the next render/refresh); a structure toggle
+in the format editor; sibling-scoped column sort.
 
 ### 6. Docs
 

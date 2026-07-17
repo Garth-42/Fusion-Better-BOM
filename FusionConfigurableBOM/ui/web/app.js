@@ -1,6 +1,6 @@
 /* global adsk */
 
-const state = { config: null, table: null, sort: null };
+const state = { config: null, table: null, sort: null, collapsed: new Set() };
 const $ = (id) => document.getElementById(id);
 let copyFeedbackTimer;
 let autoSaveTimer;
@@ -71,21 +71,70 @@ function render() {
     .join('');
   viewSelect.value = state.table.view_id;
 
+  const hierarchical = state.table.structure === 'hierarchical';
+  const treeIndex = hierarchical ? treeColumnIndex() : -1;
   $('thead').innerHTML = `<tr>${state.table.columns
-    .map((column) => columnHeader(column))
+    .map((column) => columnHeader(column, hierarchical))
     .join('')}</tr>`;
-  const rows = sortedRows();
+  const rows = hierarchical ? visibleTreeRows() : sortedRows();
   $('tbody').innerHTML = rows
-    .map((row) => `<tr>${state.table.columns.map((column) => cell(row, column)).join('')}</tr>`)
+    .map((row) => renderRow(row, treeIndex))
     .join('');
 
   $('empty').hidden = state.table.rows.length !== 0;
   $('tableHint').hidden = !state.table.rows.some((row) => rowHasEditableColumn(row));
   renderEditor();
-  status(`Showing ${state.table.rows.length} unique component${state.table.rows.length === 1 ? '' : 's'}.`);
+  if (hierarchical) {
+    const total = state.table.rows.length;
+    status(`Showing ${rows.length} of ${total} assembly line${total === 1 ? '' : 's'}.`);
+  } else {
+    status(`Showing ${state.table.rows.length} unique component${state.table.rows.length === 1 ? '' : 's'}.`);
+  }
 }
 
-function columnHeader(column) {
+// The tree affordance (indent + expand/collapse) lives on the Component column
+// when the view shows it, otherwise on the first column.
+function treeColumnIndex() {
+  const index = state.table.columns.findIndex((column) => column.source_id === 'component_name');
+  return index === -1 ? 0 : index;
+}
+
+function renderRow(row, treeIndex) {
+  const assembly = treeIndex !== -1 && row.is_assembly;
+  return `<tr${assembly ? ' class="assembly-row"' : ''}>${state.table.columns
+    .map((column, index) => cell(row, column, index === treeIndex ? treeLead(row) : ''))
+    .join('')}</tr>`;
+}
+
+function treeLead(row) {
+  const style = `padding-left:${(row.level || 0) * 16}px`;
+  if (!row.is_assembly) {
+    return `<span class="tree-lead" style="${style}"><span class="tree-spacer"></span></span>`;
+  }
+  const collapsed = state.collapsed.has(row.row_id);
+  const label = `${collapsed ? 'Expand' : 'Collapse'} ${row.values.component_name ?? 'assembly'}`;
+  return `<span class="tree-lead" style="${style}"><button class="tree-toggle" type="button" data-toggle="${escape(row.row_id)}" aria-expanded="${collapsed ? 'false' : 'true'}" aria-label="${escape(label)}" title="${collapsed ? 'Expand' : 'Collapse'}">${collapsed ? '▶' : '▼'}</button></span>`;
+}
+
+// A row is hidden when any ancestor is collapsed. Rows arrive parent-before-child,
+// so one pass over the parent chain is enough.
+function visibleTreeRows() {
+  const parentOf = new Map(state.table.rows.map((row) => [row.row_id, row.parent_id]));
+  const hidden = (row) => {
+    let parent = row.parent_id;
+    while (parent != null) {
+      if (state.collapsed.has(parent)) return true;
+      parent = parentOf.get(parent);
+    }
+    return false;
+  };
+  return state.table.rows.filter((row) => !hidden(row));
+}
+
+function columnHeader(column, hierarchical = false) {
+  // Sorting a tree by a column would break parent/child nesting, so a structured
+  // view shows plain headers without the flat sort controls.
+  if (hierarchical) return `<th><span class="column-heading"><span>${escape(column.header)}</span></span></th>`;
   const isSorted = state.sort && state.sort.sourceId === column.source_id;
   const active = (direction) => isSorted && state.sort.direction === direction ? ' active' : '';
   return `<th><span class="column-heading"><span>${escape(column.header)}</span><span class="sort-actions" aria-label="Sort ${escape(column.header)}"><button class="sort-button${active('ascending')}" type="button" data-sort="${escape(column.source_id)},ascending" aria-label="Sort ${escape(column.header)} ascending" title="Sort ascending">▲</button><button class="sort-button${active('descending')}" type="button" data-sort="${escape(column.source_id)},descending" aria-label="Sort ${escape(column.header)} descending" title="Sort descending">▼</button></span></span></th>`;
@@ -110,13 +159,13 @@ function compareValues(left, right) {
   return leftText.localeCompare(rightText, undefined, { numeric: true, sensitivity: 'base' });
 }
 
-function cell(row, column) {
+function cell(row, column, lead = '') {
   const value = row.values[column.source_id] ?? '';
-  if (column.source_type !== 'attribute') return `<td>${escape(String(value))}</td>`;
+  if (column.source_type !== 'attribute') return `<td>${lead}${escape(String(value))}</td>`;
   if (row.linked) {
-    return `<td><span title="Linked - open source design to edit">${escape(value)} 🔒</span></td>`;
+    return `<td>${lead}<span title="Linked - open source design to edit">${escape(value)} 🔒</span></td>`;
   }
-  return `<td class="editable-cell" title="Editable cell"><input data-row="${escape(row.row_id)}" data-field="${escape(column.source_id)}" aria-label="${escape(column.header)} for ${escape(row.values.component_name ?? 'component')} (editable)" value="${escape(value)}"><span class="edit-marker" aria-hidden="true">✎</span></td>`;
+  return `<td class="editable-cell" title="Editable cell">${lead}<input data-row="${escape(row.row_id)}" data-field="${escape(column.source_id)}" aria-label="${escape(column.header)} for ${escape(row.values.component_name ?? 'component')} (editable)" value="${escape(value)}"><span class="edit-marker" aria-hidden="true">✎</span></td>`;
 }
 
 function rowHasEditableColumn(row) {
@@ -140,9 +189,16 @@ function tsvCell(value) {
 // raw values — as tab-separated rows that paste straight into Sheets/Excel.
 function tableToTsv() {
   const columns = state.table.columns;
+  const hierarchical = state.table.structure === 'hierarchical';
+  const treeIndex = hierarchical ? treeColumnIndex() : -1;
+  const rows = hierarchical ? visibleTreeRows() : sortedRows();
   const lines = [columns.map((column) => column.header)];
-  sortedRows().forEach((row) => {
-    lines.push(columns.map((column) => row.values[column.source_id] ?? ''));
+  rows.forEach((row) => {
+    lines.push(columns.map((column, index) => {
+      const value = row.values[column.source_id] ?? '';
+      // Indent the tree column so the pasted outline keeps its structure.
+      return index === treeIndex && row.level ? '  '.repeat(row.level) + value : value;
+    }));
   });
   return lines.map((cells) => cells.map(tsvCell).join('\t')).join('\r\n');
 }
@@ -293,6 +349,16 @@ $('columns').onclick = (event) => {
   if (destination < 0 || destination >= columns.length) return;
   [columns[index], columns[destination]] = [columns[destination], columns[index]];
   renderEditor();
+};
+// Expand/collapse a sub-assembly. Toggle buttons are the only elements in the
+// table body carrying data-toggle, so other clicks (including into inputs) pass
+// through untouched.
+$('tbody').onclick = (event) => {
+  const rowId = event.target.dataset.toggle;
+  if (!rowId) return;
+  if (state.collapsed.has(rowId)) state.collapsed.delete(rowId);
+  else state.collapsed.add(rowId);
+  render();
 };
 // `input` writes the value into the Fusion attribute while the user types so the
 // live table stays correct; the debounced auto-save (scheduled by `send`) then
