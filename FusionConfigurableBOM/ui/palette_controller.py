@@ -34,6 +34,7 @@ class PaletteController:
         try:
             message = json.loads(raw); action = message['action']
             if action == 'refresh': return self.refresh(palette)
+            if action == 'save_design': return self._save_design(palette)
             if action == 'copy_table':
                 try:
                     copy_text(message['tsv'])
@@ -68,9 +69,20 @@ class PaletteController:
             elif action == 'delete_view':
                 if len(config.views) <= 1 or message['view_id'] in ('general', 'purchasing_demo'): raise ValueError('Default formats cannot be deleted.')
                 config.views[:] = [v for v in config.views if v.view_id != message['view_id']]; self.store.save(design.rootComponent, config)
-            self._send_state(palette, config, message.get('view_id'))
+            # A cell save originates from the live input element. Returning a full
+            # state redraw for every keystroke would replace that element, steal
+            # focus, and prevent the remaining value from being saved.
+            if action != 'save_cell':
+                self._send_state(palette, config, message.get('view_id'))
             self.send(palette, {'type':'status','message':'Saved.'})
         except Exception as exc: self.send(palette, {'type':'error','message':str(exc)})
+    def _save_design(self, palette):
+        document = getattr(self.app, 'activeDocument', None)
+        if not document:
+            raise ValueError('Open a Fusion design before saving BOM changes.')
+        if not document.save('Saved Configurable BOM changes.'):
+            raise RuntimeError('Fusion could not save the active design.')
+        self.send(palette, {'type': 'status', 'message': 'Design saved.'})
     def _apply_config(self, config, raw, renamed_fields=()):
         from ..persistence.configuration_store import from_dict
         parsed = from_dict(raw)

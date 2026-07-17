@@ -218,6 +218,7 @@ function saveConfig() {
 }
 
 $('refresh').onclick = () => { status('Scanning assembly…'); send({ action: 'refresh' }); };
+$('saveDesign').onclick = () => { status('Saving Fusion design…'); send({ action: 'save_design' }); };
 $('copy').onclick = copyTable;
 $('thead').onclick = (event) => {
   const sort = event.target.dataset.sort;
@@ -262,7 +263,10 @@ $('columns').onclick = (event) => {
   [columns[index], columns[destination]] = [columns[destination], columns[index]];
   renderEditor();
 };
-$('tbody').onchange = (event) => {
+// `change` only fires after the input loses focus.  Saving on `input` makes the
+// attribute write happen while the user is typing, including when they close
+// Fusion directly from the active cell.
+$('tbody').oninput = (event) => {
   if (!event.target.dataset.row) return;
   send({ action: 'save_cell', row_id: event.target.dataset.row, field_id: event.target.dataset.field, value: event.target.value });
 };
