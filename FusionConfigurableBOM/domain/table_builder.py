@@ -19,4 +19,4 @@ def build_table(rows, view):
             entry['parent_id'] = getattr(row, 'parent_id', None)
             entry['is_assembly'] = getattr(row, 'is_assembly', False)
         serialized.append(entry)
-    return {'view_id': view.view_id, 'structure': view.structure, 'columns': [{'source_type': c.source_type, 'source_id': c.source_id, 'header': c.header, 'width': c.width} for c in columns], 'rows': serialized}
+    return {'view_id': view.view_id, 'structure': view.structure, 'rollup_by': getattr(view, 'rollup_by', 'component'), 'columns': [{'source_type': c.source_type, 'source_id': c.source_id, 'header': c.header, 'width': c.width} for c in columns], 'rows': serialized}

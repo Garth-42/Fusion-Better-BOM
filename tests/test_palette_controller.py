@@ -203,6 +203,22 @@ class PaletteControllerTests(unittest.TestCase):
         hierarchical.assert_called_once()
         flat.assert_not_called()
 
+    def test_switching_back_to_a_scanned_format_reuses_its_cached_result(self):
+        root = object()
+        app = type('App', (), {'activeProduct': type('Product', (), {'rootComponent': root})()})()
+        controller = PaletteController(app)
+        controller.store = FakeStore(default_configuration())
+        controller.send = lambda palette, payload: None
+
+        with patch('FusionConfigurableBOM.ui.palette_controller.scan_design', return_value=([], {})) as scan, \
+             patch('FusionConfigurableBOM.ui.palette_controller.scan_design_hierarchical', return_value=([], {})):
+            controller.refresh(None, 'general')
+            controller.refresh(None, 'structured')
+            controller.refresh(None, 'general')
+
+        # General is parsed once; returning to it does not walk the assembly again.
+        self.assertEqual(1, scan.call_count)
+
     def test_saving_a_cell_propagates_to_every_row_sharing_a_component(self):
         # A hierarchical scan lists one definition as several nodes; a single edit
         # must update every cached row for that definition, since values are shared.
@@ -325,6 +341,8 @@ class PaletteControllerTests(unittest.TestCase):
         self.assertEqual(['General BOM', 'Assembly summary'], [view.name for view in views])
         self.assertEqual('Count', views[1].columns[0].header)
         self.assertNotEqual(views[0].view_id, views[1].view_id)
+        state = next(response for response in responses if response['type'] == 'state')
+        self.assertEqual(views[1].view_id, state['table']['view_id'])
         self.assertTrue(any(response['type'] == 'status' and response['message'] == 'Saved.'
                             for response in responses))
 

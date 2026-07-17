@@ -2,7 +2,7 @@ import unittest
 
 from FusionConfigurableBOM.constants import FIELD_ATTRIBUTE_GROUP
 from FusionConfigurableBOM.fusion import value_store
-from FusionConfigurableBOM.fusion.assembly_scanner import scan_design_hierarchical
+from FusionConfigurableBOM.fusion.assembly_scanner import scan_design, scan_design_hierarchical
 
 
 class _Attribute:
@@ -75,6 +75,63 @@ def _by_name(nodes):
 
 
 class HierarchicalScannerTests(unittest.TestCase):
+    def test_unreadable_part_number_does_not_abort_the_scan(self):
+        class _UnavailablePartNumberComponent(_Component):
+            @property
+            def partNumber(self):
+                raise RuntimeError('3 failed to fetch part number')
+
+            @partNumber.setter
+            def partNumber(self, value):
+                pass
+
+        component = _UnavailablePartNumberComponent('Imported part', 'imported')
+        design = _Design([_Occurrence(component)])
+
+        rows, _ = scan_design(design, [], 'part_number')
+        nodes, _ = scan_design_hierarchical(design, [])
+
+        self.assertEqual([('Imported part', 1)], [(row.component_name, row.quantity) for row in rows])
+        self.assertEqual(['Imported part'], [node.component_name for node in nodes])
+
+    def test_part_number_rollup_keeps_unique_custom_values_in_separate_rows(self):
+        first = _Component('Screw A', 'screw_a')
+        second = _Component('Screw B', 'screw_b')
+        first.partNumber = second.partNumber = 'M3-10'
+        design = _Design([_Occurrence(first), _Occurrence(second)])
+        value_store.write_value(design.rootComponent, first, 'finish', 'Zinc')
+        value_store.write_value(design.rootComponent, second, 'finish', 'Black oxide')
+
+        rows, _ = scan_design(design, ['finish'], 'part_number')
+
+        self.assertEqual(2, len(rows))
+        self.assertEqual({'Zinc', 'Black oxide'}, {row.custom_values['finish'] for row in rows})
+
+    def test_part_number_rollup_combines_matching_custom_values(self):
+        first = _Component('Screw A', 'screw_a')
+        second = _Component('Screw B', 'screw_b')
+        first.partNumber = second.partNumber = 'M3-10'
+        design = _Design([_Occurrence(first), _Occurrence(second)])
+        for component in (first, second):
+            value_store.write_value(design.rootComponent, component, 'finish', 'Zinc')
+
+        rows, _ = scan_design(design, ['finish'], 'part_number')
+
+        self.assertEqual(1, len(rows))
+        self.assertEqual(2, rows[0].quantity)
+
+    def test_subassembly_rollup_keeps_identical_parts_in_their_parent_rows(self):
+        screw = _Component('Screw', 'screw')
+        left = _Component('Left assembly', 'left')
+        right = _Component('Right assembly', 'right')
+        design = _Design([_Occurrence(left, [_Occurrence(screw)]), _Occurrence(right, [_Occurrence(screw)])])
+
+        rows, _ = scan_design(design, [], 'subassembly')
+
+        screws = [row for row in rows if row.component_name == 'Screw']
+        self.assertEqual(2, len(screws))
+        self.assertEqual({'Left assembly', 'Right assembly'}, {row.parent_assembly for row in screws})
+
     def _nested_design(self):
         # Root
         #   Gearbox  (x2 identical sub-assemblies)
@@ -108,6 +165,20 @@ class HierarchicalScannerTests(unittest.TestCase):
         self.assertEqual(nodes['Housing'].total_quantity, 2)
         self.assertEqual(nodes['Gearbox'].total_quantity, 2)
         self.assertEqual(nodes['Bracket'].total_quantity, 1)
+
+    def test_tree_signatures_are_memoized_for_repeated_nested_assemblies(self):
+        # A large repeated hierarchy asks for signatures at several depths. This
+        # guards the memoization that prevents repeated descendant traversals.
+        leaf = _Component('Leaf', 'leaf')
+        middle = _Component('Middle', 'middle')
+        top = _Component('Top', 'top')
+        middle_occurrence = _Occurrence(middle, [_Occurrence(leaf)])
+        design = _Design([_Occurrence(top, [middle_occurrence]), _Occurrence(top, [middle_occurrence])])
+
+        nodes, _ = scan_design_hierarchical(design, [])
+
+        self.assertEqual([('Top', 2), ('Middle', 2), ('Leaf', 2)],
+                         [(node.component_name, node.total_quantity) for node in nodes])
 
     def test_assembly_flag_and_parent_links(self):
         nodes, _ = scan_design_hierarchical(self._nested_design(), [])
@@ -145,6 +216,35 @@ class HierarchicalScannerTests(unittest.TestCase):
         screws = [node for node in nodes if node.component_name == 'Screw']
         self.assertEqual(sorted(node.quantity for node in screws), [2, 3])
         self.assertTrue(all(node.custom_values['manufacturer'] == 'Acme' for node in screws))
+
+    def test_same_assembly_definition_with_different_children_keeps_every_child(self):
+        # Three instances can share an assembly definition while their assigned
+        # child occurrences differ. They must not collapse into one node that
+        # follows only the first occurrence's children.
+        assembly = _Component('Fixture', 'fixture')
+        screw = _Component('Screw', 'screw')
+        washer = _Component('Washer', 'washer')
+        design = _Design([
+            _Occurrence(assembly, [_Occurrence(screw)]),
+            _Occurrence(assembly, [_Occurrence(washer)]),
+            _Occurrence(assembly, [_Occurrence(screw)]),
+        ])
+
+        nodes, _ = scan_design_hierarchical(design, [])
+
+        fixtures = [node for node in nodes if node.component_name == 'Fixture']
+        self.assertEqual(sorted(node.quantity for node in fixtures), [1, 2])
+        self.assertEqual([('Screw', 2), ('Washer', 1)],
+                         [(node.component_name, node.total_quantity) for node in nodes if not node.is_assembly])
+
+    def test_all_occurrences_fallback_keeps_a_nonempty_tree_visible(self):
+        component = _Component('Imported part', 'imported')
+        design = _Design([])
+        design.rootComponent.allOccurrences = _OccurrenceList([_Occurrence(component)])
+
+        nodes, _ = scan_design_hierarchical(design, [])
+
+        self.assertEqual([('Imported part', 0)], [(node.component_name, node.level) for node in nodes])
 
     def test_reads_legacy_component_values(self):
         component = _Component('Bracket', 'bracket')

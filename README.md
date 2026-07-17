@@ -16,6 +16,9 @@ The add-in uses its **own palette** and never modifies Fusion's native BOM UI.
   BOM** that walks the assembly tree with sub-assemblies as collapsible parent
   rows, indented children, a per-parent quantity, and a rolled-up total quantity
   for the whole design.
+- **Accurate roll-ups** — flat formats can consolidate by component definition,
+  part number, or immediate subassembly. Parts with different custom attribute
+  values are kept in separate rows, so a roll-up never hides a unique value.
 - **Editable custom columns** — add your own string fields (Manufacturer,
   Supplier, part numbers, or anything else) and edit them inline. Editable cells
   are marked with a ✎.
@@ -63,7 +66,8 @@ The add-in uses its **own palette** and never modifies Fusion's native BOM UI.
    automatically a moment after you stop typing; click **Save design** to save
    immediately.
 6. Click **Edit formats** to set a format's **Structure** (flat or
-   hierarchical), add fields, add/hide/reorder columns, rename headers, or
+   hierarchical) and its flat **Roll-up** (component, part number, or immediate
+   subassembly), add fields, add/hide/reorder columns, rename headers, or
    **Save as…** a new format.
 7. Click **Copy table** to copy the current view for pasting into a spreadsheet.
 
@@ -73,6 +77,8 @@ The add-in uses its **own palette** and never modifies Fusion's native BOM UI.
 | --- | --- | --- |
 | **General BOM** | Flat | Qty, Component, Part Number, Description |
 | **Purchasing Demo** | Flat | Qty, Component, Manufacturer, Manufacturer Part Number, Supplier, Supplier Part Number |
+| **Part Number Roll-up** | Flat, by part number | Qty, Part Number, Component, Description |
+| **Subassembly Roll-up** | Flat, by immediate subassembly | Qty, Subassembly, Component, Part Number |
 | **Structured BOM** | Hierarchical | Qty, Total Qty, Component, Part Number, Description |
 
 ## How data is stored

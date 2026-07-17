@@ -11,7 +11,7 @@ class _StubRoot:
 
 class ConfigurationTests(unittest.TestCase):
  def test_round_trip(self):
-  config=default_configuration(); self.assertEqual(loads(dumps(config)).views[1].columns[2].source_id,'manufacturer')
+  config=default_configuration(); self.assertEqual(next(view for view in loads(dumps(config)).views if view.view_id=='purchasing_demo').columns[2].source_id,'manufacturer')
  def test_headers_are_view_specific(self):
   config=default_configuration(); config.views[1].columns[2]=config.views[1].columns[2].__class__('attribute','manufacturer','Maker')
   self.assertEqual(loads(dumps(config)).views[1].columns[2].header,'Maker')
@@ -21,14 +21,19 @@ class ConfigurationTests(unittest.TestCase):
   with self.assertRaises(ConfigurationError): loads('{"schema_version":1,"fields":[{"field_id":"Bad Name","default_label":"Bad"}],"views":[{"view_id":"v","name":"V","columns":[]}]}')
  def test_v1_configuration_migrates_to_flat_views(self):
   config=loads('{"schema_version":1,"fields":[],"views":[{"view_id":"v","name":"V","columns":[]}]}')
-  self.assertEqual(config.schema_version,2); self.assertEqual(config.views[0].structure,'flat')
+  self.assertEqual(config.schema_version,3); self.assertEqual(config.views[0].structure,'flat'); self.assertEqual(config.views[0].rollup_by,'component')
+ def test_v2_configuration_migrates_to_component_rollup(self):
+  config=loads('{"schema_version":2,"fields":[],"views":[{"view_id":"v","name":"V","structure":"flat","columns":[]}]}')
+  self.assertEqual(config.schema_version,3); self.assertEqual(config.views[0].rollup_by,'component')
  def test_default_configuration_includes_a_hierarchical_view(self):
   structures={v.view_id:v.structure for v in default_configuration().views}
   self.assertEqual(structures['general'],'flat'); self.assertEqual(structures['structured'],'hierarchical')
  def test_structure_round_trips(self):
-  self.assertEqual(loads(dumps(default_configuration())).views[2].structure,'hierarchical')
+  self.assertEqual(next(view for view in loads(dumps(default_configuration())).views if view.view_id=='structured').structure,'hierarchical')
  def test_invalid_structure_is_rejected(self):
-  with self.assertRaises(ConfigurationError): loads('{"schema_version":2,"fields":[],"views":[{"view_id":"v","name":"V","structure":"bogus","columns":[]}]}')
+  with self.assertRaises(ConfigurationError): loads('{"schema_version":3,"fields":[],"views":[{"view_id":"v","name":"V","structure":"bogus","columns":[]}]}')
+ def test_invalid_rollup_is_rejected(self):
+  with self.assertRaises(ConfigurationError): loads('{"schema_version":3,"fields":[],"views":[{"view_id":"v","name":"V","rollup_by":"bogus","columns":[]}]}')
  def test_ensure_default_views_restores_a_missing_structured_view(self):
   # A design configured before the Structured BOM shipped keeps only its flat views.
   config=loads('{"schema_version":2,"fields":[],"views":[{"view_id":"general","name":"General BOM","structure":"flat","columns":[]}]}')
@@ -40,11 +45,16 @@ class ConfigurationTests(unittest.TestCase):
   config=default_configuration(); config.views[0].name='My General'
   _ensure_default_views(config)
   self.assertEqual('My General',next(v.name for v in config.views if v.view_id=='general'))
-  self.assertEqual(3,len(config.views))
+  self.assertEqual(5,len(config.views))
+ def test_ensure_default_views_restores_columns_for_an_empty_general_view(self):
+  config=loads('{"schema_version":3,"fields":[],"views":[{"view_id":"general","name":"General BOM","columns":[]}]}')
+  _ensure_default_views(config)
+  general=next(view for view in config.views if view.view_id=='general')
+  self.assertEqual(['quantity','component_name','fusion_part_number','fusion_description'],[column.source_id for column in general.columns])
  def test_store_load_adds_the_structured_view_to_a_legacy_design(self):
   # End to end through the store: a legacy v1 design (no Structured BOM) migrates
   # to v2 and gains the hierarchical format so it appears in the format picker.
   legacy='{"schema_version":1,"fields":[],"views":[{"view_id":"general","name":"General BOM","columns":[]},{"view_id":"purchasing_demo","name":"Purchasing Demo","columns":[]}]}'
   config=FusionConfigurationStore().load(_StubRoot(legacy))
-  self.assertEqual(config.schema_version,2)
+  self.assertEqual(config.schema_version,3)
   self.assertEqual('hierarchical',next(v.structure for v in config.views if v.view_id=='structured'))
