@@ -39,6 +39,15 @@
         <button id="saveAs" type="button">Save as…</button>
         <button id="delete" class="danger" type="button">Delete</button>
       </div>
+      <label class="control-label" for="editRollup">Flat roll-up</label>
+      <p class="section-description">Choose what makes flat rows the same. Different custom-field values always stay in separate rows so their columns remain accurate. Hierarchical views are already rolled up within each parent subassembly.</p>
+      <div class="format-actions">
+        <select id="editRollup" aria-label="Flat BOM roll-up for this format">
+          <option value="component">Component definition</option>
+          <option value="part_number">Part number</option>
+          <option value="subassembly">Immediate subassembly</option>
+        </select>
+      </div>
       <label class="control-label" for="editStructure">Structure</label>
       <p class="section-description">Flat lists every unique part once. Hierarchical walks the assembly tree, showing sub-assemblies as collapsible parents with a rolled-up total quantity.</p>
       <div class="format-actions">

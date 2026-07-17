@@ -3,7 +3,8 @@ from ..constants import PALETTE_ID
 from ..domain.table_builder import build_table
 from ..persistence.configuration_store import FusionConfigurationStore, new_id
 from ..domain.models import CustomFieldDefinition, ColumnDefinition, BomTableFormat
-from ..fusion.assembly_scanner import scan_design, scan_design_hierarchical
+from ..fusion.assembly_scanner import (scan_design, scan_design_hierarchical,
+    scan_design_snapshot, scan_design_from_snapshot, scan_design_hierarchical_from_snapshot)
 from ..fusion.attribute_store import write_value, rename_value
 from ..fusion.value_store import write_value as write_root_value, rename_field as rename_root_field
 from .clipboard import copy_text
@@ -20,7 +21,7 @@ def _same_component(a, b):
     return a is b
 
 class PaletteController:
-    def __init__(self, app): self.app, self.store, self.rows, self.components, self._auto_save_hinted, self._on_palette_created, self._rows_structure = app, FusionConfigurationStore(), [], {}, False, None, 'flat'
+    def __init__(self, app): self.app, self.store, self.rows, self.components, self._auto_save_hinted, self._on_palette_created, self._rows_structure, self._rows_rollup, self._scan_cache, self._snapshot, self._snapshot_key = app, FusionConfigurationStore(), [], {}, False, None, 'flat', 'component', {}, None, None
     def on_palette_created(self, hook):
         # install() registers the HTML message wiring here so it runs whenever the
         # palette is (re)built inside show(), not once at add-in load.
@@ -57,17 +58,24 @@ class PaletteController:
             palette.isVisible = False
         palette.isVisible = True
         return palette
-    def refresh(self, palette, view_id=None):
+    def refresh(self, palette, view_id=None, force=False):
         design = self.app.activeProduct
         if not getattr(design, 'rootComponent', None): return self.send(palette, {'type':'error','message':'Open a Fusion design to scan its assembly.'})
         try:
             config = self.store.load(design.rootComponent)
             view = self._view(config, view_id)
+            if force:
+                # A user-requested Refresh is the explicit freshness boundary.
+                # Format switches reuse the parsed result below, avoiding repeat
+                # Fusion occurrence-tree walks while the design is unchanged.
+                self._scan_cache.clear()
+                self._snapshot, self._snapshot_key = None, None
             # allOccurrences is a Fusion API traversal and can be expensive on large designs.
             # Only do it for an explicit Refresh; edit operations render from this cache.
             # The active view's structure picks a flat leaf scan or a structured tree walk.
-            self.rows, self.components = self._scan(design, config, view)
+            self.rows, self.components = self._scan_cached(design, config, view)
             self._rows_structure = getattr(view, 'structure', 'flat')
+            self._rows_rollup = getattr(view, 'rollup_by', 'component')
             self._send_state(palette, config, view.view_id)
         except Exception as exc: self.send(palette, {'type':'error','message':str(exc)})
     def _view(self, config, view_id):
@@ -76,11 +84,29 @@ class PaletteController:
         field_ids = [f.field_id for f in config.fields]
         if getattr(view, 'structure', 'flat') == 'hierarchical':
             return scan_design_hierarchical(design, field_ids)
-        return scan_design(design, field_ids)
+        return scan_design(design, field_ids, getattr(view, 'rollup_by', 'component'))
+    def _scan_cached(self, design, config, view):
+        # Cache only data that is independent of table columns and headers. A
+        # format switch can then redraw from the same parsed BOM; explicit
+        # Refresh and any value/configuration edit invalidate the cache.
+        key = (id(design.rootComponent), tuple(field.field_id for field in config.fields),
+               getattr(view, 'structure', 'flat'), getattr(view, 'rollup_by', 'component'))
+        snapshot_key = (id(design.rootComponent), tuple(field.field_id for field in config.fields))
+        if self._snapshot_key != snapshot_key:
+            self._snapshot = scan_design_snapshot(design, [field.field_id for field in config.fields])
+            self._snapshot_key = snapshot_key
+            self._scan_cache.clear()
+        if key not in self._scan_cache:
+            if getattr(view, 'structure', 'flat') == 'hierarchical':
+                self._scan_cache[key] = scan_design_hierarchical_from_snapshot(self._snapshot)
+            else:
+                self._scan_cache[key] = scan_design_from_snapshot(self._snapshot, getattr(view, 'rollup_by', 'component'))
+        return self._scan_cache[key]
     def receive(self, palette, raw):
         try:
             message = json.loads(raw); action = message['action']
-            if action == 'refresh': return self.refresh(palette, message.get('view_id'))
+            active_view_id = message.get('view_id')
+            if action == 'refresh': return self.refresh(palette, message.get('view_id'), bool(message.get('force')))
             if action == 'save_design': return self._save_design(palette, auto=bool(message.get('auto')))
             if action == 'copy_table':
                 try:
@@ -107,33 +133,46 @@ class PaletteController:
                 for row in self.rows:
                     if _same_component(self.components.get(row.row_id), component):
                         row.custom_values[message['field_id']] = value
+                self._scan_cache.clear()
+                self._snapshot, self._snapshot_key = None, None
             elif action == 'save_config':
                 self._apply_config(config, message['config'], message.get('renamed_fields', [])); self.store.save(design.rootComponent, config)
+                self._scan_cache.clear()
+                self._snapshot, self._snapshot_key = None, None
             elif action == 'save_as_view':
                 self._apply_config(config, message['config'], message.get('renamed_fields', []))
                 source = next(v for v in config.views if v.view_id == message['view_id'])
-                config.views.append(BomTableFormat(new_id('view'), message['name'], list(source.columns), source.structure))
+                saved_view = BomTableFormat(new_id('view'), message['name'], list(source.columns), source.structure, source.rollup_by)
+                config.views.append(saved_view)
+                # Select the newly created format in the palette. Previously it
+                # was saved but the response re-rendered the source view, making
+                # Save as appear to have done nothing.
+                active_view_id = saved_view.view_id
                 self.store.save(design.rootComponent, config)
+                self._scan_cache.clear()
+                self._snapshot, self._snapshot_key = None, None
             elif action == 'new_field':
                 field_id = message['field_id']; config.fields.append(CustomFieldDefinition(field_id, message['label']))
                 for row in self.rows: row.custom_values[field_id] = ''
                 next(v for v in config.views if v.view_id == message.get('view_id', config.views[0].view_id)).columns.append(ColumnDefinition('attribute', field_id, message['label'])); self.store.save(design.rootComponent, config)
+                self._scan_cache.clear()
+                self._snapshot, self._snapshot_key = None, None
             elif action == 'add_column':
                 view = next(v for v in config.views if v.view_id == message['view_id'])
                 field = next(f for f in config.fields if f.field_id == message['field_id'])
                 if not any(c.source_type == 'attribute' and c.source_id == field.field_id for c in view.columns): view.columns.append(ColumnDefinition('attribute', field.field_id, field.default_label))
                 self.store.save(design.rootComponent, config)
             elif action == 'duplicate_view':
-                source = next(v for v in config.views if v.view_id == message['view_id']); config.views.append(BomTableFormat(new_id('view'), message.get('name', source.name + ' Copy'), list(source.columns), source.structure)); self.store.save(design.rootComponent, config)
+                source = next(v for v in config.views if v.view_id == message['view_id']); config.views.append(BomTableFormat(new_id('view'), message.get('name', source.name + ' Copy'), list(source.columns), source.structure, source.rollup_by)); self.store.save(design.rootComponent, config)
             elif action == 'delete_view':
-                if len(config.views) <= 1 or message['view_id'] in ('general', 'purchasing_demo', 'structured'): raise ValueError('Default formats cannot be deleted.')
+                if len(config.views) <= 1 or message['view_id'] in ('general', 'purchasing_demo', 'structured', 'part_number_rollup', 'subassembly_rollup'): raise ValueError('Default formats cannot be deleted.')
                 config.views[:] = [v for v in config.views if v.view_id != message['view_id']]; self.store.save(design.rootComponent, config)
             # A cell save originates from the live input element. Returning a full
             # state redraw for every keystroke would replace that element, steal
             # focus, and prevent the remaining value from being saved.
             if action != 'save_cell':
-                self._resync_rows_structure(design, config, message.get('view_id'))
-                self._send_state(palette, config, message.get('view_id'))
+                self._resync_rows_structure(design, config, active_view_id)
+                self._send_state(palette, config, active_view_id)
             self.send(palette, {'type':'status','message':'Saved.'})
         except Exception as exc: self.send(palette, {'type':'error','message':str(exc)})
     def _save_design(self, palette, auto=False):
@@ -193,10 +232,12 @@ class PaletteController:
         # otherwise a newly hierarchical view would render its flat rows as a plain
         # list with a blank Total Qty and no tree (and vice versa).
         view = next((item for item in config.views if item.view_id == view_id), config.views[0])
-        if getattr(view, 'structure', 'flat') == self._rows_structure:
+        structure = getattr(view, 'structure', 'flat')
+        rollup = getattr(view, 'rollup_by', 'component')
+        if structure == self._rows_structure and (structure == 'hierarchical' or rollup == self._rows_rollup):
             return
-        self.rows, self.components = self._scan(design, config, view)
-        self._rows_structure = getattr(view, 'structure', 'flat')
+        self.rows, self.components = self._scan_cached(design, config, view)
+        self._rows_structure, self._rows_rollup = structure, rollup
     def _config(self, config):
         from ..domain.models import configuration_to_dict
         return configuration_to_dict(config)
