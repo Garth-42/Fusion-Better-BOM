@@ -50,6 +50,38 @@ class FakeRoot:
         self.attributes = FakeAttributes()
 
 
+class _RecordingPalette:
+    def __init__(self, is_visible=False, is_valid=True):
+        self.isValid = is_valid
+        self.dockingState = None
+        self._is_visible = is_visible
+        self.visibility_writes = []
+
+    @property
+    def isVisible(self):
+        return self._is_visible
+
+    @isVisible.setter
+    def isVisible(self, value):
+        self._is_visible = value
+        self.visibility_writes.append(value)
+
+
+def _palette_app(existing, created):
+    palettes = type('Palettes', (), {
+        'itemById': lambda self, palette_id: existing,
+        'add': lambda self, *args: created,
+    })()
+    return type('App', (), {'userInterface': type('UserInterface', (), {'palettes': palettes})()})()
+
+
+def _adsk_modules():
+    docking_states = type('PaletteDockingStates', (), {'PaletteDockStateFloating': 'floating'})
+    adsk = types.ModuleType('adsk')
+    adsk.core = types.SimpleNamespace(PaletteDockingStates=docking_states)
+    return {'adsk': adsk, 'adsk.core': adsk.core}
+
+
 class PaletteControllerTests(unittest.TestCase):
     def test_show_opens_a_new_palette_in_a_floating_window(self):
         palette = type('Palette', (), {'dockingState': None, 'isVisible': False})()
@@ -70,6 +102,46 @@ class PaletteControllerTests(unittest.TestCase):
 
         self.assertIs(palette, result)
         self.assertEqual('floating', palette.dockingState)
+        self.assertTrue(palette.isVisible)
+
+    def test_show_wires_the_html_handler_only_when_the_palette_is_built(self):
+        # The incoming-message handler must be attached at creation so it also
+        # re-attaches after a workspace switch rebuilds the palette.
+        palette = _RecordingPalette(is_visible=False)
+        controller = PaletteController(_palette_app(existing=None, created=palette))
+        created_with = []
+        controller.on_palette_created(created_with.append)
+
+        with patch.dict(sys.modules, _adsk_modules()):
+            controller.show()
+
+        self.assertEqual([palette], created_with)
+        self.assertTrue(palette.isVisible)
+
+    def test_show_rebuilds_a_palette_invalidated_by_a_workspace_switch(self):
+        # Fusion deletes palettes when the workspace changes; the stale handle is
+        # invalid and must be replaced rather than reused.
+        stale = _RecordingPalette(is_visible=True, is_valid=False)
+        fresh = _RecordingPalette(is_visible=False)
+        controller = PaletteController(_palette_app(existing=stale, created=fresh))
+
+        with patch.dict(sys.modules, _adsk_modules()):
+            result = controller.show()
+
+        self.assertIs(fresh, result)
+        self.assertEqual('floating', fresh.dockingState)
+        self.assertTrue(fresh.isVisible)
+
+    def test_show_raises_an_already_visible_palette_back_to_the_front(self):
+        # Re-opening a palette that is up but buried toggles visibility so its
+        # floating window re-stacks above the tree and collapsed panels.
+        palette = _RecordingPalette(is_visible=True)
+        controller = PaletteController(_palette_app(existing=palette, created=None))
+
+        with patch.dict(sys.modules, _adsk_modules()):
+            controller.show()
+
+        self.assertEqual([False, True], palette.visibility_writes)
         self.assertTrue(palette.isVisible)
 
     def test_saving_a_cell_updates_cached_value_without_redrawing_the_input(self):
