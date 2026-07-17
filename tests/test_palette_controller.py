@@ -194,14 +194,34 @@ class PaletteControllerTests(unittest.TestCase):
         controller.store = FakeStore(default_configuration())
         controller.send = lambda palette, payload: None
 
-        with patch('FusionConfigurableBOM.ui.palette_controller.scan_design_hierarchical',
+        with patch('FusionConfigurableBOM.ui.palette_controller.scan_design_snapshot',
+                   return_value=object()) as snapshot, \
+             patch('FusionConfigurableBOM.ui.palette_controller.scan_design_hierarchical_from_snapshot',
                    return_value=([], {})) as hierarchical, \
-             patch('FusionConfigurableBOM.ui.palette_controller.scan_design',
-                   return_value=([], {})) as flat:
+             patch('FusionConfigurableBOM.ui.palette_controller.scan_design_from_snapshot') as flat:
             controller.receive(None, json.dumps({'action': 'refresh', 'view_id': 'structured'}))
 
         hierarchical.assert_called_once()
         flat.assert_not_called()
+        snapshot.assert_called_once()
+
+    def test_switching_back_to_a_scanned_format_reuses_its_cached_result(self):
+        root = object()
+        app = type('App', (), {'activeProduct': type('Product', (), {'rootComponent': root})()})()
+        controller = PaletteController(app)
+        controller.store = FakeStore(default_configuration())
+        controller.send = lambda palette, payload: None
+
+        with patch('FusionConfigurableBOM.ui.palette_controller.scan_design_snapshot', return_value=object()) as snapshot, \
+             patch('FusionConfigurableBOM.ui.palette_controller.scan_design_from_snapshot', return_value=([], {})) as scan, \
+             patch('FusionConfigurableBOM.ui.palette_controller.scan_design_hierarchical_from_snapshot', return_value=([], {})):
+            controller.refresh(None, 'general')
+            controller.refresh(None, 'structured')
+            controller.refresh(None, 'general')
+
+        # The Fusion tree is parsed once; returning to General reuses its rows.
+        self.assertEqual(1, scan.call_count)
+        self.assertEqual(1, snapshot.call_count)
 
     def test_switching_back_to_a_scanned_format_reuses_its_cached_result(self):
         root = object()
@@ -259,10 +279,11 @@ class PaletteControllerTests(unittest.TestCase):
             if view['view_id'] == 'general':
                 view['structure'] = 'hierarchical'
 
-        with patch('FusionConfigurableBOM.ui.palette_controller.scan_design_hierarchical',
+        with patch('FusionConfigurableBOM.ui.palette_controller.scan_design_snapshot',
+                   return_value=object()), \
+             patch('FusionConfigurableBOM.ui.palette_controller.scan_design_hierarchical_from_snapshot',
                    return_value=([], {})) as hierarchical, \
-             patch('FusionConfigurableBOM.ui.palette_controller.scan_design',
-                   return_value=([], {})) as flat:
+             patch('FusionConfigurableBOM.ui.palette_controller.scan_design_from_snapshot') as flat:
             controller.receive(None, json.dumps({
                 'action': 'save_config', 'config': raw_config, 'view_id': 'general',
             }))
@@ -302,11 +323,14 @@ class PaletteControllerTests(unittest.TestCase):
         controller.send = lambda palette, payload: responses.append(payload)
 
         scanned_rows = [ConceptBomRow('row_1', 'Bracket', 2)]
-        with patch('FusionConfigurableBOM.ui.palette_controller.scan_design',
+        with patch('FusionConfigurableBOM.ui.palette_controller.scan_design_snapshot',
+                   return_value=object()) as snapshot, \
+             patch('FusionConfigurableBOM.ui.palette_controller.scan_design_from_snapshot',
                    return_value=(scanned_rows, {'row_1': object()})) as scan_design:
             controller.receive(None, json.dumps({'action': 'refresh'}))
 
         scan_design.assert_called_once()
+        snapshot.assert_called_once()
         self.assertEqual(scanned_rows, controller.rows)
         state = next(response for response in responses if response['type'] == 'state')
         self.assertEqual(1, len(state['table']['rows']))

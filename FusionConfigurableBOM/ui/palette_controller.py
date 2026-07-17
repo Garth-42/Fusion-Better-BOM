@@ -3,7 +3,8 @@ from ..constants import PALETTE_ID
 from ..domain.table_builder import build_table
 from ..persistence.configuration_store import FusionConfigurationStore, new_id
 from ..domain.models import CustomFieldDefinition, ColumnDefinition, BomTableFormat
-from ..fusion.assembly_scanner import scan_design, scan_design_hierarchical
+from ..fusion.assembly_scanner import (scan_design, scan_design_hierarchical,
+    scan_design_snapshot, scan_design_from_snapshot, scan_design_hierarchical_from_snapshot)
 from ..fusion.attribute_store import write_value, rename_value
 from ..fusion.value_store import write_value as write_root_value, rename_field as rename_root_field
 from .clipboard import copy_text
@@ -20,7 +21,7 @@ def _same_component(a, b):
     return a is b
 
 class PaletteController:
-    def __init__(self, app): self.app, self.store, self.rows, self.components, self._auto_save_hinted, self._on_palette_created, self._rows_structure, self._rows_rollup, self._scan_cache = app, FusionConfigurationStore(), [], {}, False, None, 'flat', 'component', {}
+    def __init__(self, app): self.app, self.store, self.rows, self.components, self._auto_save_hinted, self._on_palette_created, self._rows_structure, self._rows_rollup, self._scan_cache, self._snapshot, self._snapshot_key = app, FusionConfigurationStore(), [], {}, False, None, 'flat', 'component', {}, None, None
     def on_palette_created(self, hook):
         # install() registers the HTML message wiring here so it runs whenever the
         # palette is (re)built inside show(), not once at add-in load.
@@ -68,6 +69,7 @@ class PaletteController:
                 # Format switches reuse the parsed result below, avoiding repeat
                 # Fusion occurrence-tree walks while the design is unchanged.
                 self._scan_cache.clear()
+                self._snapshot, self._snapshot_key = None, None
             # allOccurrences is a Fusion API traversal and can be expensive on large designs.
             # Only do it for an explicit Refresh; edit operations render from this cache.
             # The active view's structure picks a flat leaf scan or a structured tree walk.
@@ -89,8 +91,16 @@ class PaletteController:
         # Refresh and any value/configuration edit invalidate the cache.
         key = (id(design.rootComponent), tuple(field.field_id for field in config.fields),
                getattr(view, 'structure', 'flat'), getattr(view, 'rollup_by', 'component'))
+        snapshot_key = (id(design.rootComponent), tuple(field.field_id for field in config.fields))
+        if self._snapshot_key != snapshot_key:
+            self._snapshot = scan_design_snapshot(design, [field.field_id for field in config.fields])
+            self._snapshot_key = snapshot_key
+            self._scan_cache.clear()
         if key not in self._scan_cache:
-            self._scan_cache[key] = self._scan(design, config, view)
+            if getattr(view, 'structure', 'flat') == 'hierarchical':
+                self._scan_cache[key] = scan_design_hierarchical_from_snapshot(self._snapshot)
+            else:
+                self._scan_cache[key] = scan_design_from_snapshot(self._snapshot, getattr(view, 'rollup_by', 'component'))
         return self._scan_cache[key]
     def receive(self, palette, raw):
         try:
@@ -124,9 +134,11 @@ class PaletteController:
                     if _same_component(self.components.get(row.row_id), component):
                         row.custom_values[message['field_id']] = value
                 self._scan_cache.clear()
+                self._snapshot, self._snapshot_key = None, None
             elif action == 'save_config':
                 self._apply_config(config, message['config'], message.get('renamed_fields', [])); self.store.save(design.rootComponent, config)
                 self._scan_cache.clear()
+                self._snapshot, self._snapshot_key = None, None
             elif action == 'save_as_view':
                 self._apply_config(config, message['config'], message.get('renamed_fields', []))
                 source = next(v for v in config.views if v.view_id == message['view_id'])
@@ -138,11 +150,13 @@ class PaletteController:
                 active_view_id = saved_view.view_id
                 self.store.save(design.rootComponent, config)
                 self._scan_cache.clear()
+                self._snapshot, self._snapshot_key = None, None
             elif action == 'new_field':
                 field_id = message['field_id']; config.fields.append(CustomFieldDefinition(field_id, message['label']))
                 for row in self.rows: row.custom_values[field_id] = ''
                 next(v for v in config.views if v.view_id == message.get('view_id', config.views[0].view_id)).columns.append(ColumnDefinition('attribute', field_id, message['label'])); self.store.save(design.rootComponent, config)
                 self._scan_cache.clear()
+                self._snapshot, self._snapshot_key = None, None
             elif action == 'add_column':
                 view = next(v for v in config.views if v.view_id == message['view_id'])
                 field = next(f for f in config.fields if f.field_id == message['field_id'])
