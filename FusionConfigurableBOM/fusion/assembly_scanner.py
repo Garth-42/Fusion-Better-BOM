@@ -1,4 +1,4 @@
-from ..domain.models import ConceptBomRow
+from ..domain.models import ConceptBomRow, HierarchicalBomNode
 from .attribute_store import read_values as read_component_values
 from .value_store import read_values as read_root_values
 
@@ -16,6 +16,11 @@ def _items(collection):
     if getattr(collection, 'count', None) == 0:
         return []
     return list(collection or [])
+
+def _visible(occurrences):
+    """Occurrences that count toward a BOM: present in the tree and not suppressed."""
+    return [occurrence for occurrence in _items(occurrences)
+            if not getattr(occurrence, 'isSuppressed', False)]
 
 def _root_descendants(root):
     """Fallback traversal for designs where allOccurrences is unexpectedly empty."""
@@ -75,3 +80,50 @@ def scan_design(design, field_ids):
             getattr(component, 'material', None).name if getattr(component, 'material', None) else None,
             _is_linked(component), values))
     return rows, {f'row_{i}': entry['component'] for i, entry in enumerate(grouped.values(), 1)}
+
+def _shared_values(root, component, field_ids):
+    # Values are keyed by component definition, so every node for the same
+    # definition reads the same values. Root-stored values win over any legacy
+    # value written on the component itself, matching the flat scan.
+    values = read_component_values(component, field_ids)
+    values.update(read_root_values(root, component, field_ids))
+    return values
+
+def scan_design_hierarchical(design, field_ids):
+    """Walk the assembly tree into structured BOM nodes.
+
+    Returns (nodes, components) with the same contract as scan_design: nodes are
+    ordered parent-before-child (depth first, preserving browser order) and the
+    components map lets the controller write edits back by row. Identical sibling
+    occurrences under one parent collapse into a single node whose `quantity` is
+    the count; `total_quantity` rolls that up through the parent chain so a leaf
+    reports how many exist in the whole design along that path.
+    """
+    root = design.rootComponent
+    nodes, components, counter = [], {}, [0]
+    def walk(occurrences, parent_id, level, parent_rollup):
+        # Aggregate by component definition among these siblings only. Fusion can
+        # hand back a new proxy per occurrence, so entityToken (via _component_key)
+        # keeps repeated instances of one definition on a single node.
+        grouped = {}
+        for occurrence in occurrences:
+            component = occurrence.component
+            entry = grouped.setdefault(_component_key(component),
+                {'occurrence': occurrence, 'component': component, 'quantity': 0})
+            entry['quantity'] += 1
+        for entry in grouped.values():
+            component, quantity = entry['component'], entry['quantity']
+            rollup = quantity * parent_rollup
+            counter[0] += 1
+            row_id = f'row_{counter[0]}'
+            children = _visible(getattr(entry['occurrence'], 'childOccurrences', None))
+            nodes.append(HierarchicalBomNode(row_id, component.name, level, parent_id,
+                quantity, rollup, bool(children),
+                getattr(component, 'partNumber', None), getattr(component, 'description', None),
+                getattr(component, 'material', None).name if getattr(component, 'material', None) else None,
+                _is_linked(component), _shared_values(root, component, field_ids)))
+            components[row_id] = component
+            if children:
+                walk(children, row_id, level + 1, rollup)
+    walk(_visible(getattr(root, 'occurrences', None)), None, 0, 1)
+    return nodes, components

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added a hierarchical (structured) BOM as a per-view option. A new **Structured BOM** format walks the assembly tree, showing sub-assemblies as collapsible parent rows with their children indented beneath. Each line reports a per-parent quantity and a rolled-up total for the whole design. Flat leaf views are unchanged and remain the default. Custom values stay shared by component definition, so a part shows the same values everywhere it appears. Copying a structured view preserves the indented outline. See `docs/hierarchical-bom-plan.md`.
+- Bumped the configuration schema to v2 (per-view structure). Existing v1 designs migrate automatically with every view defaulting to a flat BOM; no stored fields, columns, or values are lost.
 - Fixed BOM cell values disappearing after closing and reopening a design: values are now stored in one map on the active design's root component (keyed by each part's persistent id) instead of on the individual components. Component-level values were not saved when a part was referenced from another file, so the active design's save never captured them. Existing values written on components are still read as a fallback.
 - Persisted BOM attribute and format edits automatically by debounce-saving the Fusion document a moment after editing stops, so values survive closing and reopening Fusion without a manual save.
 - Kept the Save design button for an immediate save and made saves best-effort on documents that have not been saved to a project yet.

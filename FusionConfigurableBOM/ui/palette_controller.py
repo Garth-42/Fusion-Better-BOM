@@ -3,10 +3,21 @@ from ..constants import PALETTE_ID
 from ..domain.table_builder import build_table
 from ..persistence.configuration_store import FusionConfigurationStore, new_id
 from ..domain.models import CustomFieldDefinition, ColumnDefinition, BomTableFormat
-from ..fusion.assembly_scanner import scan_design
+from ..fusion.assembly_scanner import scan_design, scan_design_hierarchical
 from ..fusion.attribute_store import write_value, rename_value
 from ..fusion.value_store import write_value as write_root_value, rename_field as rename_root_field
 from .clipboard import copy_text
+
+def _same_component(a, b):
+    # Two occurrences of one definition share a persistent entityToken even when
+    # Fusion hands back different Python proxies; fall back to identity for the
+    # test doubles that omit a token.
+    if a is None or b is None:
+        return a is b
+    token_a, token_b = getattr(a, 'entityToken', None), getattr(b, 'entityToken', None)
+    if token_a or token_b:
+        return token_a == token_b
+    return a is b
 
 class PaletteController:
     def __init__(self, app): self.app, self.store, self.rows, self.components, self._auto_save_hinted = app, FusionConfigurationStore(), [], {}, False
@@ -21,20 +32,29 @@ class PaletteController:
             palette.dockingState = adsk.core.PaletteDockingStates.PaletteDockStateFloating
         palette.isVisible = True
         return palette
-    def refresh(self, palette):
+    def refresh(self, palette, view_id=None):
         design = self.app.activeProduct
         if not getattr(design, 'rootComponent', None): return self.send(palette, {'type':'error','message':'Open a Fusion design to scan its assembly.'})
         try:
             config = self.store.load(design.rootComponent)
+            view = self._view(config, view_id)
             # allOccurrences is a Fusion API traversal and can be expensive on large designs.
             # Only do it for an explicit Refresh; edit operations render from this cache.
-            self.rows, self.components = scan_design(design, [f.field_id for f in config.fields])
-            self._send_state(palette, config)
+            # The active view's structure picks a flat leaf scan or a structured tree walk.
+            self.rows, self.components = self._scan(design, config, view)
+            self._send_state(palette, config, view.view_id)
         except Exception as exc: self.send(palette, {'type':'error','message':str(exc)})
+    def _view(self, config, view_id):
+        return next((view for view in config.views if view.view_id == view_id), config.views[0])
+    def _scan(self, design, config, view):
+        field_ids = [f.field_id for f in config.fields]
+        if getattr(view, 'structure', 'flat') == 'hierarchical':
+            return scan_design_hierarchical(design, field_ids)
+        return scan_design(design, field_ids)
     def receive(self, palette, raw):
         try:
             message = json.loads(raw); action = message['action']
-            if action == 'refresh': return self.refresh(palette)
+            if action == 'refresh': return self.refresh(palette, message.get('view_id'))
             if action == 'save_design': return self._save_design(palette, auto=bool(message.get('auto')))
             if action == 'copy_table':
                 try:
@@ -55,13 +75,18 @@ class PaletteController:
                     write_value(component, message['field_id'], value)
                 except Exception:
                     pass  # Best-effort legacy mirror; the root store above is authoritative.
-                next(row for row in self.rows if row.row_id == message['row_id']).custom_values[message['field_id']] = value
+                # A hierarchical scan can list one component definition as several
+                # nodes; values are shared by definition, so update every cached
+                # row that resolves to the same component (a flat scan matches one).
+                for row in self.rows:
+                    if _same_component(self.components.get(row.row_id), component):
+                        row.custom_values[message['field_id']] = value
             elif action == 'save_config':
                 self._apply_config(config, message['config'], message.get('renamed_fields', [])); self.store.save(design.rootComponent, config)
             elif action == 'save_as_view':
                 self._apply_config(config, message['config'], message.get('renamed_fields', []))
                 source = next(v for v in config.views if v.view_id == message['view_id'])
-                config.views.append(BomTableFormat(new_id('view'), message['name'], list(source.columns)))
+                config.views.append(BomTableFormat(new_id('view'), message['name'], list(source.columns), source.structure))
                 self.store.save(design.rootComponent, config)
             elif action == 'new_field':
                 field_id = message['field_id']; config.fields.append(CustomFieldDefinition(field_id, message['label']))
@@ -73,9 +98,9 @@ class PaletteController:
                 if not any(c.source_type == 'attribute' and c.source_id == field.field_id for c in view.columns): view.columns.append(ColumnDefinition('attribute', field.field_id, field.default_label))
                 self.store.save(design.rootComponent, config)
             elif action == 'duplicate_view':
-                source = next(v for v in config.views if v.view_id == message['view_id']); config.views.append(BomTableFormat(new_id('view'), message.get('name', source.name + ' Copy'), list(source.columns))); self.store.save(design.rootComponent, config)
+                source = next(v for v in config.views if v.view_id == message['view_id']); config.views.append(BomTableFormat(new_id('view'), message.get('name', source.name + ' Copy'), list(source.columns), source.structure)); self.store.save(design.rootComponent, config)
             elif action == 'delete_view':
-                if len(config.views) <= 1 or message['view_id'] in ('general', 'purchasing_demo'): raise ValueError('Default formats cannot be deleted.')
+                if len(config.views) <= 1 or message['view_id'] in ('general', 'purchasing_demo', 'structured'): raise ValueError('Default formats cannot be deleted.')
                 config.views[:] = [v for v in config.views if v.view_id != message['view_id']]; self.store.save(design.rootComponent, config)
             # A cell save originates from the live input element. Returning a full
             # state redraw for every keystroke would replace that element, steal

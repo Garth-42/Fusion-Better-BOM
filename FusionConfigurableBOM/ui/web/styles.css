@@ -4,6 +4,7 @@
   --text: #202124; --muted: #5f6368; --border: #d0d4d8; --input-border: #aab0b6;
   --accent: #1769aa; --accent-hover: #0f5792; --accent-text: #fff;
   --success: #16723f; --danger: #b3261e; --focus: #1967d2;
+  --tree-assembly: #eaf1f8;
   --shadow: 0 14px 36px rgb(32 33 36 / 22%);
 }
 
@@ -13,6 +14,7 @@
     --text: #e8eaed; --muted: #b8bec5; --border: #555b60; --input-border: #747b82;
     --accent: #65b7f3; --accent-hover: #8bc9f7; --accent-text: #10202c;
     --success: #6dd58c; --danger: #ff8a80; --focus: #8ab4f8;
+    --tree-assembly: #2b3238;
     --shadow: 0 14px 36px rgb(0 0 0 / 48%);
   }
 }
@@ -49,6 +51,13 @@ th { background: var(--surface-muted); font-weight: 600; }
 .sort-button { width: 16px; height: 11px; padding: 0; color: var(--muted); background: transparent; border: 0; border-radius: 2px; font-size: 8px; line-height: 1; }
 .sort-button:hover, .sort-button.active { color: var(--accent); background: var(--surface); }
 tbody tr:hover { background: var(--surface-muted); }
+.assembly-row { font-weight: 600; }
+.assembly-row td { background: var(--tree-assembly); }
+.assembly-row:hover td { background: var(--surface-muted); }
+.tree-lead { display: inline-flex; align-items: center; vertical-align: middle; }
+.tree-toggle { width: 18px; height: 18px; padding: 0; margin-right: 5px; color: var(--muted); background: transparent; border: 0; border-radius: 3px; font-size: 9px; line-height: 1; }
+.tree-toggle:hover { color: var(--accent); background: var(--surface); }
+.tree-spacer { display: inline-block; width: 18px; margin-right: 5px; }
 .table-hint { display: flex; align-items: center; gap: 6px; margin: 10px 2px -2px; color: var(--muted); font-size: 12px; }
 .edit-key, .edit-marker { color: var(--accent); font-weight: 700; }
 .editable-cell { position: relative; min-width: 130px; padding-right: 26px; }

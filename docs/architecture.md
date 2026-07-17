@@ -50,6 +50,8 @@ The first version supports only:
 
 The scanner creates a flattened leaf-component list and counts repeated component definitions. It excludes the root component. It does not implement procurement BOM behaviors, configuration logic, or enterprise identity resolution.
 
+A hierarchical (structured) scan is also available as a per-view option. It walks the assembly tree, keeps sub-assemblies as parent rows, and reports both a per-parent quantity and a rolled-up total for the whole design. Custom values stay shared by component definition. See `docs/hierarchical-bom-plan.md`.
+
 ### 3.5 Linked components
 
 Linked components are shown but custom cells are read-only in the parent assembly. Parent-assembly metadata overrides are a roadmap feature.
@@ -75,7 +77,9 @@ Linked components are shown but custom cells are read-only in the parent assembl
 
 ## 5. Deliverable 1 non-goals
 
-The first deliverable excludes supplier information, CSV exports, pricing, stock, packaging, unit conversion, build quantities, filters, procurement calculations, assembly overrides, Custom Properties, native BOM modification, structured BOMs, and cloud integrations.
+The first deliverable excludes supplier information, CSV exports, pricing, stock, packaging, unit conversion, build quantities, filters, procurement calculations, assembly overrides, Custom Properties, native BOM modification, and cloud integrations.
+
+Structured/hierarchical BOM, originally deferred here, is now available as a per-view option — see `docs/hierarchical-bom-plan.md`. Per-location (assembly) overrides remain deferred; values are still shared by component definition.
 
 ## 6. Future roadmap architecture
 

@@ -64,6 +64,29 @@ The visible header is defined by the selected table format and is not part of th
 
 Rows include a `linked` flag. The UI shows linked rows but prevents Attribute edits in the parent design.
 
+## Hierarchical BOM nodes
+
+The structured BOM option produces `HierarchicalBomNode` rows. The flat model above is unchanged and still backs flat views.
+
+```python
+@dataclass
+class HierarchicalBomNode:
+    row_id: str
+    component_name: str
+    level: int              # 0-based depth
+    parent_id: str | None
+    quantity: int           # count directly under the immediate parent
+    total_quantity: int     # rolled-up occurrences in the whole design via this path
+    is_assembly: bool
+    fusion_part_number: str | None
+    fusion_description: str | None
+    material: str | None
+    linked: bool
+    custom_values: dict[str, str]
+```
+
+One component definition can produce several nodes — one for each place it sits in the tree — but `custom_values` stays keyed by the component definition, so every node for a definition shows the same values. `total_quantity` equals `quantity` multiplied up the parent chain. See `docs/hierarchical-bom-plan.md`.
+
 ## Explicitly deferred roadmap types
 
 Do not add these to Deliverable 1 production code:
