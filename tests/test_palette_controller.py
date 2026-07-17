@@ -2,7 +2,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from FusionConfigurableBOM.domain.models import ConceptBomRow
+from FusionConfigurableBOM.domain.models import ConceptBomRow, configuration_to_dict
 from FusionConfigurableBOM.persistence.configuration_store import default_configuration
 from FusionConfigurableBOM.ui.palette_controller import PaletteController
 
@@ -61,3 +61,72 @@ class PaletteControllerTests(unittest.TestCase):
         self.assertFalse(any(response['type'] == 'status' and response['message'] == 'Saved.'
                              for response in responses))
 
+    def test_save_as_creates_a_named_copy_with_pending_column_edits(self):
+        root = object()
+        app = type('App', (), {'activeProduct': type('Product', (), {'rootComponent': root})()})()
+        controller = PaletteController(app)
+        controller.store = FakeStore(default_configuration())
+        responses = []
+        controller.send = lambda palette, payload: responses.append(payload)
+        raw_config = {
+            'schema_version': 1,
+            'fields': [],
+            'views': [{
+                'view_id': 'general', 'name': 'General BOM',
+                'columns': [{'source_type': 'builtin', 'source_id': 'quantity',
+                             'header': 'Count', 'visible': True, 'width': 70}],
+            }],
+        }
+
+        controller.receive(None, json.dumps({
+            'action': 'save_as_view', 'config': raw_config, 'view_id': 'general',
+            'name': 'Assembly summary',
+        }))
+
+        views = controller.store.config.views
+        self.assertEqual(['General BOM', 'Assembly summary'], [view.name for view in views])
+        self.assertEqual('Count', views[1].columns[0].header)
+        self.assertNotEqual(views[0].view_id, views[1].view_id)
+        self.assertTrue(any(response['type'] == 'status' and response['message'] == 'Saved.'
+                            for response in responses))
+
+    def test_copy_table_uses_the_host_clipboard(self):
+        app = type('App', (), {'activeProduct': None})()
+        controller = PaletteController(app)
+        responses = []
+        controller.send = lambda palette, payload: responses.append(payload)
+
+        with patch('FusionConfigurableBOM.ui.palette_controller.copy_text') as copy_text:
+            controller.receive(None, json.dumps({
+                'action': 'copy_table', 'tsv': 'Qty\tPart\r\n1\tBracket', 'row_count': 1,
+            }))
+
+        copy_text.assert_called_once_with('Qty\tPart\r\n1\tBracket')
+        self.assertEqual({'type': 'copy_result', 'copied': True, 'row_count': 1}, responses[0])
+
+    def test_renaming_a_custom_attribute_migrates_cached_component_values(self):
+        root = object()
+        app = type('App', (), {'activeProduct': type('Product', (), {'rootComponent': root})()})()
+        controller = PaletteController(app)
+        controller.store = FakeStore(default_configuration())
+        component = object()
+        controller.rows = [ConceptBomRow('row_1', 'Bracket', 1, custom_values={'manufacturer': 'Acme'})]
+        controller.components = {'row_1': component}
+        controller.send = lambda palette, payload: None
+        raw_config = configuration_to_dict(controller.store.config)
+        for field in raw_config['fields']:
+            if field['field_id'] == 'manufacturer': field['field_id'] = 'maker'
+        for view in raw_config['views']:
+            for column in view['columns']:
+                if column['source_type'] == 'attribute' and column['source_id'] == 'manufacturer':
+                    column['source_id'] = 'maker'
+
+        with patch('FusionConfigurableBOM.ui.palette_controller.rename_value') as rename_value:
+            controller.receive(None, json.dumps({
+                'action': 'save_config', 'config': raw_config,
+                'renamed_fields': [{'old_id': 'manufacturer', 'new_id': 'maker'}],
+            }))
+
+        rename_value.assert_called_once_with(component, 'manufacturer', 'maker')
+        self.assertEqual({'maker': 'Acme'}, controller.rows[0].custom_values)
+        self.assertIn('maker', [field.field_id for field in controller.store.config.fields])

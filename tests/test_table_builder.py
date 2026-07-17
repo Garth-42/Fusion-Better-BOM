@@ -14,7 +14,7 @@ class TableTests(unittest.TestCase):
 class _Attributes:
  def itemByName(self, group, name): return None
 class _Component:
- def __init__(self,name): self.name=name; self.attributes=_Attributes(); self.partNumber=''; self.description=''; self.material=None; self.isReferencedComponent=False
+ def __init__(self,name,entity_token=None): self.name=name; self.entityToken=entity_token; self.attributes=_Attributes(); self.partNumber=''; self.description=''; self.material=None; self.isReferencedComponent=False
 class _Children:
  count=0
 class _NonLeafChildren:
@@ -31,6 +31,11 @@ class ScannerTests(unittest.TestCase):
   repeated=_Component('Bracket'); distinct=_Component('Bracket')
   rows,_=scan_design(_Design([_Occurrence(repeated),_Occurrence(repeated),_Occurrence(repeated),_Occurrence(distinct)]),[])
   self.assertEqual(sorted(row.quantity for row in rows),[1,3])
+ def test_component_proxies_with_the_same_entity_token_are_aggregated(self):
+  from FusionConfigurableBOM.fusion.assembly_scanner import scan_design
+  first_proxy=_Component('Bracket','component-token-1'); second_proxy=_Component('Bracket','component-token-1')
+  rows,_=scan_design(_Design([_Occurrence(first_proxy),_Occurrence(second_proxy)]),[])
+  self.assertEqual([(row.component_name, row.quantity) for row in rows],[('Bracket',2)])
  def test_non_leaf_only_assembly_falls_back_to_visible_occurrences(self):
   from FusionConfigurableBOM.fusion.assembly_scanner import scan_design
   component=_Component('Imported assembly')
