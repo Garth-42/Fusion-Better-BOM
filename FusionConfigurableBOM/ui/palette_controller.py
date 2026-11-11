@@ -1,33 +1,59 @@
-import json, os
+import json
+import os
+
 from ..constants import PALETTE_ID
+from ..domain.models import BomTableFormat, ColumnDefinition, CustomFieldDefinition, configuration_to_dict
 from ..domain.table_builder import build_table
-from ..persistence.configuration_store import FusionConfigurationStore, new_id
-from ..domain.models import CustomFieldDefinition, ColumnDefinition, BomTableFormat
-from ..fusion.assembly_scanner import (scan_design, scan_design_hierarchical,
-    scan_design_snapshot, scan_design_from_snapshot, scan_design_hierarchical_from_snapshot)
-from ..fusion.attribute_store import write_value, rename_value
-from ..fusion.value_store import write_value as write_root_value, rename_field as rename_root_field
+from ..fusion.assembly_scanner import (
+    scan_design_from_snapshot,
+    scan_design_hierarchical_from_snapshot,
+    scan_design_snapshot,
+)
+from ..fusion.attribute_store import rename_value, write_value
+from ..fusion.identity import component_key
+from ..fusion.value_store import rename_field as rename_root_field
+from ..fusion.value_store import write_values as write_root_values
+from ..persistence.configuration_store import (
+    DEFAULT_VIEW_IDS,
+    FIELD_ID_RULE,
+    FusionConfigurationStore,
+    from_dict,
+    is_valid_field_id,
+    new_id,
+)
 from .clipboard import copy_text
 
-def _same_component(a, b):
-    # Two occurrences of one definition share a persistent entityToken even when
-    # Fusion hands back different Python proxies; fall back to identity for the
-    # test doubles that omit a token.
-    if a is None or b is None:
-        return a is b
-    token_a, token_b = getattr(a, 'entityToken', None), getattr(b, 'entityToken', None)
-    if token_a or token_b:
-        return token_a == token_b
-    return a is b
+NO_DESIGN_MESSAGE = 'Open a Fusion design to scan its assembly.'
+STALE_MESSAGE = 'The table is out of date. Click Refresh and try again.'
+
 
 class PaletteController:
-    def __init__(self, app): self.app, self.store, self.rows, self.components, self._auto_save_hinted, self._on_palette_created, self._rows_structure, self._rows_rollup, self._scan_cache, self._snapshot, self._snapshot_key = app, FusionConfigurationStore(), [], {}, False, None, 'flat', 'component', {}, None, None
+    def __init__(self, app):
+        self.app = app
+        self.store = FusionConfigurationStore()
+        self.rows = []
+        # row_id -> the (first) Fusion component behind that row.
+        self.components = {}
+        self._auto_save_hinted = False
+        self._on_palette_created = None
+        self._rows_structure = 'flat'
+        self._rows_rollup = 'component'
+        # Identity of the design root the current rows were scanned from.
+        self._scanned_root = None
+        self._scan_cache = {}
+        self._snapshot = None
+        self._snapshot_key = None
+
+    # ----- palette window -------------------------------------------------
+
     def on_palette_created(self, hook):
         # install() registers the HTML message wiring here so it runs whenever the
         # palette is (re)built inside show(), not once at add-in load.
         self._on_palette_created = hook
+
     def show(self):
         import adsk.core
+
         ui = self.app.userInterface
         palette = ui.palettes.itemById(PALETTE_ID)
         # Fusion discards palettes when the user switches workspaces; a stale
@@ -47,7 +73,8 @@ class PaletteController:
             # hidden, so showing it a moment later paints blank, and forcing the
             # newer browser can leave the HTML unrendered. Both must match the
             # original working call so the toolbar and table draw on first open.
-            palette = ui.palettes.add(PALETTE_ID, 'Configurable BOM', 'file:///' + path.replace('\\', '/'), True, True, True, 900, 600)
+            url = 'file:///' + path.replace('\\', '/')
+            palette = ui.palettes.add(PALETTE_ID, 'Configurable BOM', url, True, True, True, 900, 600)
             palette.dockingState = adsk.core.PaletteDockingStates.PaletteDockStateFloating
             if self._on_palette_created:
                 self._on_palette_created(palette)
@@ -58,202 +85,319 @@ class PaletteController:
             palette.isVisible = False
         palette.isVisible = True
         return palette
+
+    def document_activated(self):
+        # The user switched to another document tab. The rows on screen belong to
+        # the previous design, so ask the page to re-scan (it knows which format
+        # is selected). Edits against the old rows are refused in receive().
+        palette = self.app.userInterface.palettes.itemById(PALETTE_ID)
+        if palette and getattr(palette, 'isValid', True) and palette.isVisible:
+            self.send(palette, {'type': 'document_changed'})
+
+    def send(self, palette, payload):
+        palette.sendInfoToHTML('fusionBomMessage', json.dumps(payload))
+
+    # ----- scanning -------------------------------------------------------
+
+    def _design(self):
+        product = getattr(self.app, 'activeProduct', None)
+        if getattr(product, 'rootComponent', None):
+            return product
+        # In a non-design workspace (e.g. Manufacture) activeProduct is not the
+        # Design, but the document still has one.
+        products = getattr(getattr(self.app, 'activeDocument', None), 'products', None)
+        if products:
+            try:
+                design = products.itemByProductType('DesignProductType')
+            except Exception:
+                design = None
+            if getattr(design, 'rootComponent', None):
+                return design
+        raise ValueError(NO_DESIGN_MESSAGE)
+
+    def _root_identity(self, design):
+        # Fusion hands back a brand-new Python proxy on every `rootComponent`
+        # access, so id() of that proxy can never key a cache or tell two
+        # designs apart; component_key uses the persistent ID instead.
+        return component_key(design.rootComponent)
+
     def refresh(self, palette, view_id=None, force=False):
-        design = self.app.activeProduct
-        if not getattr(design, 'rootComponent', None): return self.send(palette, {'type':'error','message':'Open a Fusion design to scan its assembly.'})
         try:
+            design = self._design()
             config = self.store.load(design.rootComponent)
             view = self._view(config, view_id)
             if force:
                 # A user-requested Refresh is the explicit freshness boundary.
-                # Format switches reuse the parsed result below, avoiding repeat
+                # Format switches reuse the parsed snapshot, avoiding repeat
                 # Fusion occurrence-tree walks while the design is unchanged.
-                self._scan_cache.clear()
-                self._snapshot, self._snapshot_key = None, None
-            # allOccurrences is a Fusion API traversal and can be expensive on large designs.
-            # Only do it for an explicit Refresh; edit operations render from this cache.
-            # The active view's structure picks a flat leaf scan or a structured tree walk.
-            self.rows, self.components = self._scan_cached(design, config, view)
-            self._rows_structure = getattr(view, 'structure', 'flat')
-            self._rows_rollup = getattr(view, 'rollup_by', 'component')
+                self._invalidate_snapshot()
+            self._load_rows(design, config, view)
             self._send_state(palette, config, view.view_id)
-        except Exception as exc: self.send(palette, {'type':'error','message':str(exc)})
+        except Exception as exc:
+            self._send_error(palette, exc)
+
     def _view(self, config, view_id):
+        """The requested view, or the first one when it is missing/unspecified."""
         return next((view for view in config.views if view.view_id == view_id), config.views[0])
-    def _scan(self, design, config, view):
-        field_ids = [f.field_id for f in config.fields]
-        if getattr(view, 'structure', 'flat') == 'hierarchical':
-            return scan_design_hierarchical(design, field_ids)
-        return scan_design(design, field_ids, getattr(view, 'rollup_by', 'component'))
-    def _root_identity(self, design):
-        # Fusion hands back a brand-new Python proxy on every `rootComponent`
-        # (and `activeProduct`) access, so id() of that proxy changes call to
-        # call and can never key a cache that must survive across format
-        # switches. The persistent entityToken is stable for the life of the
-        # design, so cache on it and fall back to object identity only for the
-        # test doubles / proxies that expose no token.
-        root = design.rootComponent
-        token = getattr(root, 'entityToken', None)
-        return ('entity_token', token) if token else ('object_id', id(root))
+
+    def _invalidate_snapshot(self):
+        self._scan_cache.clear()
+        self._snapshot, self._snapshot_key = None, None
+
+    def _load_rows(self, design, config, view):
+        self.rows, self.components = self._scan_cached(design, config, view)
+        self._rows_structure, self._rows_rollup = view.structure, view.rollup_by
+        self._scanned_root = self._root_identity(design)
+
     def _scan_cached(self, design, config, view):
-        # Cache only data that is independent of table columns and headers. A
-        # format switch can then redraw from the same parsed BOM; explicit
-        # Refresh and any value/configuration edit invalidate the cache.
+        # The snapshot holds everything read from Fusion and is independent of
+        # table columns, so every format is aggregated from it without another
+        # walk. It is rebuilt on explicit Refresh, a different design, or a
+        # changed field set; cell edits patch it in place.
         root_identity = self._root_identity(design)
         field_ids = tuple(field.field_id for field in config.fields)
-        key = (root_identity, field_ids,
-               getattr(view, 'structure', 'flat'), getattr(view, 'rollup_by', 'component'))
         snapshot_key = (root_identity, field_ids)
         if self._snapshot_key != snapshot_key:
             self._snapshot = scan_design_snapshot(design, list(field_ids))
             self._snapshot_key = snapshot_key
             self._scan_cache.clear()
+        key = (view.structure, view.rollup_by if view.structure == 'flat' else None)
         if key not in self._scan_cache:
-            if getattr(view, 'structure', 'flat') == 'hierarchical':
+            if view.structure == 'hierarchical':
                 self._scan_cache[key] = scan_design_hierarchical_from_snapshot(self._snapshot)
             else:
-                self._scan_cache[key] = scan_design_from_snapshot(self._snapshot, getattr(view, 'rollup_by', 'component'))
+                self._scan_cache[key] = scan_design_from_snapshot(self._snapshot, view.rollup_by)
         return self._scan_cache[key]
+
+    def _resync_rows_structure(self, design, config, view):
+        # The format editor can flip a view between flat and hierarchical (or
+        # change its roll-up). When the view now on screen was scanned in another
+        # shape the cached rows no longer fit, so re-aggregate before sending
+        # state -- otherwise a newly hierarchical view would render flat rows.
+        if view.structure == self._rows_structure and (
+            view.structure == 'hierarchical' or view.rollup_by == self._rows_rollup
+        ):
+            return
+        self._load_rows(design, config, view)
+
+    def _send_state(self, palette, config, view_id=None):
+        view = self._view(config, view_id)
+        self.send(
+            palette,
+            {'type': 'state', 'config': configuration_to_dict(config), 'table': build_table(self.rows, view)},
+        )
+
+    def _send_error(self, palette, exc):
+        # Some exceptions (StopIteration, KeyError) have empty or cryptic text.
+        if isinstance(exc, KeyError):
+            text = f'The request was missing {exc}.'
+        else:
+            text = str(exc) or type(exc).__name__
+        self.send(palette, {'type': 'error', 'message': text})
+
+    # ----- messages from the page ----------------------------------------
+
     def receive(self, palette, raw):
         try:
-            message = json.loads(raw); action = message['action']
-            active_view_id = message.get('view_id')
-            if action == 'refresh': return self.refresh(palette, message.get('view_id'), bool(message.get('force')))
-            if action == 'save_design': return self._save_design(palette, auto=bool(message.get('auto')))
+            message = json.loads(raw)
+            action = message['action']
+            if action == 'refresh':
+                return self.refresh(palette, message.get('view_id'), bool(message.get('force')))
+            if action == 'save_design':
+                return self._save_design(palette, auto=bool(message.get('auto')))
             if action == 'copy_table':
-                try:
-                    copy_text(message['tsv'])
-                except Exception as exc:
-                    return self.send(palette, {'type': 'copy_result', 'copied': False, 'message': str(exc)})
-                return self.send(palette, {'type': 'copy_result', 'copied': True, 'row_count': message['row_count']})
-            design = self.app.activeProduct; config = self.store.load(design.rootComponent)
+                return self._copy_table(palette, message)
+
+            design = self._design()
+            # Everything below edits data using what the page last saw. If the
+            # user has since switched documents, that would write one design's
+            # rows/configuration into another.
+            if self._scanned_root is not None and self._scanned_root != self._root_identity(design):
+                raise ValueError(
+                    'The active design changed since this table was scanned. Click Refresh and try again.'
+                )
             if action == 'save_cell':
-                component = self.components[message['row_id']]
-                if getattr(component, 'isReferencedComponent', False): raise ValueError('Linked components are read-only; open the source design to edit.')
-                value = message.get('value', '')
-                # Authoritative store on the active design's root so the value is
-                # saved with the design; the component write keeps legacy data in
-                # sync but does not persist for parts that live in another file.
-                write_root_value(design.rootComponent, component, message['field_id'], value)
-                try:
-                    write_value(component, message['field_id'], value)
-                except Exception:
-                    pass  # Best-effort legacy mirror; the root store above is authoritative.
-                # A hierarchical scan can list one component definition as several
-                # nodes; values are shared by definition, so update every cached
-                # row that resolves to the same component (a flat scan matches one).
-                for row in self.rows:
-                    if _same_component(self.components.get(row.row_id), component):
-                        row.custom_values[message['field_id']] = value
-                self._scan_cache.clear()
-                self._snapshot, self._snapshot_key = None, None
-            elif action == 'save_config':
-                self._apply_config(config, message['config'], message.get('renamed_fields', [])); self.store.save(design.rootComponent, config)
-                self._scan_cache.clear()
-                self._snapshot, self._snapshot_key = None, None
-            elif action == 'save_as_view':
-                self._apply_config(config, message['config'], message.get('renamed_fields', []))
-                source = next(v for v in config.views if v.view_id == message['view_id'])
-                saved_view = BomTableFormat(new_id('view'), message['name'], list(source.columns), source.structure, source.rollup_by)
-                config.views.append(saved_view)
-                # Select the newly created format in the palette. Previously it
-                # was saved but the response re-rendered the source view, making
-                # Save as appear to have done nothing.
-                active_view_id = saved_view.view_id
-                self.store.save(design.rootComponent, config)
-                self._scan_cache.clear()
-                self._snapshot, self._snapshot_key = None, None
-            elif action == 'new_field':
-                field_id = message['field_id']; config.fields.append(CustomFieldDefinition(field_id, message['label']))
-                for row in self.rows: row.custom_values[field_id] = ''
-                next(v for v in config.views if v.view_id == message.get('view_id', config.views[0].view_id)).columns.append(ColumnDefinition('attribute', field_id, message['label'])); self.store.save(design.rootComponent, config)
-                self._scan_cache.clear()
-                self._snapshot, self._snapshot_key = None, None
-            elif action == 'add_column':
-                view = next(v for v in config.views if v.view_id == message['view_id'])
-                field = next(f for f in config.fields if f.field_id == message['field_id'])
-                if not any(c.source_type == 'attribute' and c.source_id == field.field_id for c in view.columns): view.columns.append(ColumnDefinition('attribute', field.field_id, field.default_label))
-                self.store.save(design.rootComponent, config)
-            elif action == 'duplicate_view':
-                source = next(v for v in config.views if v.view_id == message['view_id']); config.views.append(BomTableFormat(new_id('view'), message.get('name', source.name + ' Copy'), list(source.columns), source.structure, source.rollup_by)); self.store.save(design.rootComponent, config)
-            elif action == 'delete_view':
-                if len(config.views) <= 1 or message['view_id'] in ('general', 'purchasing_demo', 'structured', 'part_number_rollup', 'subassembly_rollup'): raise ValueError('Default formats cannot be deleted.')
-                config.views[:] = [v for v in config.views if v.view_id != message['view_id']]; self.store.save(design.rootComponent, config)
-            # A cell save originates from the live input element. Returning a full
-            # state redraw for every keystroke would replace that element, steal
-            # focus, and prevent the remaining value from being saved.
-            if action != 'save_cell':
-                self._resync_rows_structure(design, config, active_view_id)
-                self._send_state(palette, config, active_view_id)
-            self.send(palette, {'type':'status','message':'Saved.'})
-        except Exception as exc: self.send(palette, {'type':'error','message':str(exc)})
-    def _save_design(self, palette, auto=False):
-        # Fusion attributes only reach disk when the document is saved, and adding
-        # an attribute does not mark the document modified, so Fusion never prompts
-        # on close. Persisting here is what actually survives a close/reopen.
-        document = getattr(self.app, 'activeDocument', None)
-        if not document:
-            if auto:
-                return
-            raise ValueError('Open a Fusion design before saving BOM changes.')
+                # A cell save originates from the live input element. Returning a
+                # full state redraw would replace that element and steal focus.
+                self._save_cell(design, message)
+            else:
+                handler = self._CONFIG_ACTIONS.get(action)
+                if handler is None:
+                    raise ValueError(f'Unknown action: {action}')
+                root = design.rootComponent
+                config = self.store.load(root)
+                active_view_id = handler(self, config, message) or message.get('view_id')
+                self.store.save(root, config)
+                # No snapshot invalidation needed: it is keyed on the field set,
+                # so a new or renamed field forces a re-scan on its own.
+                view = self._view(config, active_view_id)
+                self._resync_rows_structure(design, config, view)
+                self._send_state(palette, config, view.view_id)
+            self.send(palette, {'type': 'status', 'message': 'Updated.'})
+        except Exception as exc:
+            self._send_error(palette, exc)
+
+    def _copy_table(self, palette, message):
         try:
-            saved = document.save('Saved Configurable BOM changes.')
-        except Exception:
-            # Auto-saves are best-effort; the manual Save design button surfaces errors.
-            if auto:
-                return
-            raise
-        if not saved:
-            hint = 'Save the design in Fusion once (File ▸ Save) so BOM edits can persist.'
-            if not auto:
-                raise RuntimeError('Fusion could not save the active design. ' + hint)
-            # An unsaved/untitled document cannot be saved from here; hint once so
-            # repeated auto-saves do not spam the status line.
-            if not self._auto_save_hinted:
-                self._auto_save_hinted = True
-                self.send(palette, {'type': 'status', 'message': hint})
-            return
-        self._auto_save_hinted = False
-        self.send(palette, {'type': 'status', 'message': 'Design saved.'})
+            copy_text(message['tsv'])
+        except Exception as exc:
+            return self.send(palette, {'type': 'copy_result', 'copied': False, 'message': str(exc)})
+        return self.send(palette, {'type': 'copy_result', 'copied': True, 'row_count': message['row_count']})
+
+    def _save_cell(self, design, message):
+        row_id, field_id, value = message['row_id'], message['field_id'], message.get('value', '')
+        if row_id not in self.components:
+            raise ValueError(STALE_MESSAGE)
+        row = next((item for item in self.rows if item.row_id == row_id), None)
+        # A part-number roll-up row can stand for several component definitions;
+        # the edit applies to all of them so the row does not split on refresh.
+        members = [member for member in getattr(row, 'members', []) if not member.linked]
+        targets = [member.component for member in members]
+        if not getattr(row, 'members', []):
+            component = self.components[row_id]
+            if not getattr(component, 'isReferencedComponent', False):
+                targets = [component]
+        if not targets:
+            raise ValueError('Linked components are read-only; open the source design to edit.')
+        # Authoritative store on the active design's root so the value is saved
+        # with the design; the component write keeps legacy data in sync but
+        # does not persist for parts that live in another file.
+        write_root_values(design.rootComponent, targets, field_id, value)
+        for component in targets:
+            try:
+                write_value(component, field_id, value)
+            except Exception:
+                pass  # Best-effort legacy mirror; the root store is authoritative.
+        # Keep the parsed snapshot current so later format switches need no
+        # Fusion walk, and drop the aggregated rows derived from the old values.
+        for member in members:
+            member.custom_values[field_id] = value
+        self._scan_cache.clear()
+        # A hierarchical scan lists one definition as several nodes; values are
+        # shared by definition, so update every row on screen that resolves to
+        # an edited component.
+        target_keys = {component_key(component) for component in targets}
+        for item in self.rows:
+            keys = {member.key for member in getattr(item, 'members', [])}
+            if item.row_id in self.components:
+                keys.add(component_key(self.components[item.row_id]))
+            if keys & target_keys:
+                item.custom_values[field_id] = value
+
+    def _find_view(self, config, view_id):
+        view = next((item for item in config.views if item.view_id == view_id), None)
+        if view is None:
+            raise ValueError('That table format no longer exists. ' + STALE_MESSAGE)
+        return view
+
+    def _action_save_config(self, config, message):
+        self._apply_config(config, message['config'], message.get('renamed_fields', []))
+
+    def _action_save_as_view(self, config, message):
+        self._apply_config(config, message['config'], message.get('renamed_fields', []))
+        source = self._find_view(config, message['view_id'])
+        name = str(message['name']).strip()
+        if not name:
+            raise ValueError('Enter a name for the new table format.')
+        saved = BomTableFormat(new_id('view'), name, list(source.columns), source.structure, source.rollup_by)
+        config.views.append(saved)
+        # Select the newly created format so Save as visibly did something.
+        return saved.view_id
+
+    def _action_new_field(self, config, message):
+        field_id, label = message['field_id'], str(message['label']).strip()
+        if not is_valid_field_id(field_id):
+            raise ValueError(FIELD_ID_RULE)
+        if any(field.field_id == field_id for field in config.fields):
+            raise ValueError(f'A custom field with the key "{field_id}" already exists.')
+        if not label:
+            raise ValueError('Enter a name for the custom field.')
+        view = self._find_view(config, message.get('view_id', config.views[0].view_id))
+        config.fields.append(CustomFieldDefinition(field_id, label))
+        view.columns.append(ColumnDefinition('attribute', field_id, label))
+        for row in self.rows:
+            row.custom_values[field_id] = ''
+
+    def _action_add_column(self, config, message):
+        view = self._find_view(config, message['view_id'])
+        field = next((item for item in config.fields if item.field_id == message['field_id']), None)
+        if field is None:
+            raise ValueError('That custom field no longer exists. ' + STALE_MESSAGE)
+        if any(c.source_type == 'attribute' and c.source_id == field.field_id for c in view.columns):
+            raise ValueError(f'"{field.default_label}" is already a column in this format.')
+        view.columns.append(ColumnDefinition('attribute', field.field_id, field.default_label))
+
+    def _action_delete_view(self, config, message):
+        view = self._find_view(config, message['view_id'])
+        if len(config.views) <= 1 or view.view_id in DEFAULT_VIEW_IDS:
+            raise ValueError('Default formats cannot be deleted.')
+        config.views.remove(view)
+
+    _CONFIG_ACTIONS = {
+        'save_config': _action_save_config,
+        'save_as_view': _action_save_as_view,
+        'new_field': _action_new_field,
+        'add_column': _action_add_column,
+        'delete_view': _action_delete_view,
+    }
+
     def _apply_config(self, config, raw, renamed_fields=()):
-        from ..persistence.configuration_store import from_dict
         parsed = from_dict(raw)
-        root = getattr(self.app.activeProduct, 'rootComponent', None)
+        root = getattr(self._design(), 'rootComponent', None)
         old_field_ids = {field.field_id for field in config.fields}
         new_field_ids = {field.field_id for field in parsed.fields}
         for rename in renamed_fields:
-            old_id, new_id = rename['old_id'], rename['new_id']
-            if old_id not in old_field_ids or new_id not in new_field_ids:
+            old_field_id, new_field_id = rename['old_id'], rename['new_id']
+            if old_field_id not in old_field_ids or new_field_id not in new_field_ids:
                 raise ValueError('Invalid custom attribute rename.')
-            if old_id == new_id:
+            if old_field_id == new_field_id:
                 continue
             # Migrate the authoritative root-stored values, then the legacy
             # per-component values, so a renamed column keeps its data.
             if root is not None:
-                rename_root_field(root, old_id, new_id)
+                rename_root_field(root, old_field_id, new_field_id)
             for row in self.rows:
-                row.custom_values[new_id] = row.custom_values.pop(old_id, '')
+                row.custom_values[new_field_id] = row.custom_values.pop(old_field_id, '')
                 component = self.components.get(row.row_id)
                 if component and not row.linked:
-                    rename_value(component, old_id, new_id)
+                    try:
+                        rename_value(component, old_field_id, new_field_id)
+                    except Exception:
+                        pass  # Best-effort legacy mirror; the root store is authoritative.
         config.fields, config.views = parsed.fields, parsed.views
-    def _resync_rows_structure(self, design, config, view_id):
-        # The format editor can flip a view between flat and hierarchical. When the
-        # view now on screen was scanned in the other shape (flat leaves vs tree
-        # nodes), the cached rows no longer fit, so re-scan before sending state --
-        # otherwise a newly hierarchical view would render its flat rows as a plain
-        # list with a blank Total Qty and no tree (and vice versa).
-        view = next((item for item in config.views if item.view_id == view_id), config.views[0])
-        structure = getattr(view, 'structure', 'flat')
-        rollup = getattr(view, 'rollup_by', 'component')
-        if structure == self._rows_structure and (structure == 'hierarchical' or rollup == self._rows_rollup):
-            return
-        self.rows, self.components = self._scan_cached(design, config, view)
-        self._rows_structure, self._rows_rollup = structure, rollup
-    def _config(self, config):
-        from ..domain.models import configuration_to_dict
-        return configuration_to_dict(config)
-    def _send_state(self, palette, config, view_id=None):
-        view = next((item for item in config.views if item.view_id == view_id), config.views[0])
-        self.send(palette, {'type':'state','config': self._config(config), 'table': build_table(self.rows, view)})
-    def send(self, palette, payload): palette.sendInfoToHTML('fusionBomMessage', json.dumps(payload))
+
+    # ----- saving the Fusion document -------------------------------------
+
+    def _save_design(self, palette, auto=False):
+        # Fusion attributes only reach disk when the document is saved, and adding
+        # an attribute does not mark the document modified, so Fusion never prompts
+        # on close. Persisting here is what actually survives a close/reopen.
+        # `auto` is only sent when the user has switched on Auto-save in the
+        # palette, because every save creates a new version of the design.
+        try:
+            document = getattr(self.app, 'activeDocument', None)
+            if not document:
+                if auto:
+                    return
+                raise ValueError('Open a Fusion design before saving BOM changes.')
+            try:
+                saved = document.save('Saved Configurable BOM changes.')
+            except Exception:
+                # Auto-saves are best-effort; the Save design button surfaces errors.
+                if auto:
+                    return
+                raise
+            if not saved:
+                hint = 'Save the design in Fusion once (File ▸ Save) so BOM edits can persist.'
+                if not auto:
+                    raise RuntimeError('Fusion could not save the active design. ' + hint)
+                # An unsaved/untitled document cannot be saved from here; hint once
+                # so repeated auto-saves do not spam the status line.
+                if not self._auto_save_hinted:
+                    self._auto_save_hinted = True
+                    self.send(palette, {'type': 'status', 'message': hint})
+                return
+            self._auto_save_hinted = False
+            self.send(palette, {'type': 'status', 'message': 'Design saved.', 'design_saved': True})
+        except Exception as exc:
+            self._send_error(palette, exc)

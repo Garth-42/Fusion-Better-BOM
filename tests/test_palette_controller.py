@@ -68,10 +68,14 @@ class _RecordingPalette:
 
 
 def _palette_app(existing, created):
-    palettes = type('Palettes', (), {
-        'itemById': lambda self, palette_id: existing,
-        'add': lambda self, *args: created,
-    })()
+    palettes = type(
+        'Palettes',
+        (),
+        {
+            'itemById': lambda self, palette_id: existing,
+            'add': lambda self, *args: created,
+        },
+    )()
     return type('App', (), {'userInterface': type('UserInterface', (), {'palettes': palettes})()})()
 
 
@@ -85,15 +89,23 @@ def _adsk_modules():
 class PaletteControllerTests(unittest.TestCase):
     def test_show_opens_a_new_palette_in_a_floating_window(self):
         palette = type('Palette', (), {'dockingState': None, 'isVisible': False})()
-        palettes = type('Palettes', (), {
-            'itemById': lambda self, palette_id: None,
-            'add': lambda self, *args: palette,
-        })()
+        palettes = type(
+            'Palettes',
+            (),
+            {
+                'itemById': lambda self, palette_id: None,
+                'add': lambda self, *args: palette,
+            },
+        )()
         app = type('App', (), {'userInterface': type('UserInterface', (), {'palettes': palettes})()})()
         controller = PaletteController(app)
-        docking_states = type('PaletteDockingStates', (), {
-            'PaletteDockStateFloating': 'floating',
-        })
+        docking_states = type(
+            'PaletteDockingStates',
+            (),
+            {
+                'PaletteDockStateFloating': 'floating',
+            },
+        )
         adsk = types.ModuleType('adsk')
         adsk.core = types.SimpleNamespace(PaletteDockingStates=docking_states)
 
@@ -155,15 +167,23 @@ class PaletteControllerTests(unittest.TestCase):
         controller.send = lambda palette, payload: responses.append(payload)
 
         with patch('FusionConfigurableBOM.ui.palette_controller.write_value') as write_value:
-            controller.receive(None, json.dumps({
-                'action': 'save_cell', 'row_id': 'row_1', 'field_id': 'manufacturer',
-                'value': 'Acme', 'view_id': 'purchasing_demo',
-            }))
+            controller.receive(
+                None,
+                json.dumps(
+                    {
+                        'action': 'save_cell',
+                        'row_id': 'row_1',
+                        'field_id': 'manufacturer',
+                        'value': 'Acme',
+                        'view_id': 'purchasing_demo',
+                    }
+                ),
+            )
 
         write_value.assert_called_once_with(controller.components['row_1'], 'manufacturer', 'Acme')
         self.assertEqual('Acme', controller.rows[0].custom_values['manufacturer'])
         self.assertFalse(any(response['type'] == 'state' for response in responses))
-        self.assertIn({'type': 'status', 'message': 'Saved.'}, responses)
+        self.assertIn({'type': 'status', 'message': 'Updated.'}, responses)
 
     def test_saving_a_cell_persists_the_value_on_the_design_root(self):
         # The value must land on the active design's root (which is always saved
@@ -178,14 +198,22 @@ class PaletteControllerTests(unittest.TestCase):
         controller.components = {'row_1': component}
         controller.send = lambda palette, payload: None
 
-        controller.receive(None, json.dumps({
-            'action': 'save_cell', 'row_id': 'row_1', 'field_id': 'manufacturer',
-            'value': 'Acme', 'view_id': 'purchasing_demo',
-        }))
+        controller.receive(
+            None,
+            json.dumps(
+                {
+                    'action': 'save_cell',
+                    'row_id': 'row_1',
+                    'field_id': 'manufacturer',
+                    'value': 'Acme',
+                    'view_id': 'purchasing_demo',
+                }
+            ),
+        )
 
         from FusionConfigurableBOM.fusion import value_store
-        self.assertEqual({'manufacturer': 'Acme'},
-                         value_store.read_values(root, component, ['manufacturer']))
+
+        self.assertEqual({'manufacturer': 'Acme'}, value_store.read_values(root, component, ['manufacturer']))
 
     def test_refresh_routes_a_hierarchical_view_to_the_tree_scan(self):
         root = object()
@@ -194,11 +222,16 @@ class PaletteControllerTests(unittest.TestCase):
         controller.store = FakeStore(default_configuration())
         controller.send = lambda palette, payload: None
 
-        with patch('FusionConfigurableBOM.ui.palette_controller.scan_design_snapshot',
-                   return_value=object()) as snapshot, \
-             patch('FusionConfigurableBOM.ui.palette_controller.scan_design_hierarchical_from_snapshot',
-                   return_value=([], {})) as hierarchical, \
-             patch('FusionConfigurableBOM.ui.palette_controller.scan_design_from_snapshot') as flat:
+        with (
+            patch(
+                'FusionConfigurableBOM.ui.palette_controller.scan_design_snapshot', return_value=object()
+            ) as snapshot,
+            patch(
+                'FusionConfigurableBOM.ui.palette_controller.scan_design_hierarchical_from_snapshot',
+                return_value=([], {}),
+            ) as hierarchical,
+            patch('FusionConfigurableBOM.ui.palette_controller.scan_design_from_snapshot') as flat,
+        ):
             controller.receive(None, json.dumps({'action': 'refresh', 'view_id': 'structured'}))
 
         hierarchical.assert_called_once()
@@ -212,9 +245,18 @@ class PaletteControllerTests(unittest.TestCase):
         controller.store = FakeStore(default_configuration())
         controller.send = lambda palette, payload: None
 
-        with patch('FusionConfigurableBOM.ui.palette_controller.scan_design_snapshot', return_value=object()) as snapshot, \
-             patch('FusionConfigurableBOM.ui.palette_controller.scan_design_from_snapshot', return_value=([], {})) as scan, \
-             patch('FusionConfigurableBOM.ui.palette_controller.scan_design_hierarchical_from_snapshot', return_value=([], {})):
+        with (
+            patch(
+                'FusionConfigurableBOM.ui.palette_controller.scan_design_snapshot', return_value=object()
+            ) as snapshot,
+            patch(
+                'FusionConfigurableBOM.ui.palette_controller.scan_design_from_snapshot', return_value=([], {})
+            ) as scan,
+            patch(
+                'FusionConfigurableBOM.ui.palette_controller.scan_design_hierarchical_from_snapshot',
+                return_value=([], {}),
+            ),
+        ):
             controller.refresh(None, 'general')
             controller.refresh(None, 'structured')
             controller.refresh(None, 'general')
@@ -242,9 +284,18 @@ class PaletteControllerTests(unittest.TestCase):
         controller.store = FakeStore(default_configuration())
         controller.send = lambda palette, payload: None
 
-        with patch('FusionConfigurableBOM.ui.palette_controller.scan_design_snapshot', return_value=object()) as snapshot, \
-             patch('FusionConfigurableBOM.ui.palette_controller.scan_design_from_snapshot', return_value=([], {})) as flat, \
-             patch('FusionConfigurableBOM.ui.palette_controller.scan_design_hierarchical_from_snapshot', return_value=([], {})):
+        with (
+            patch(
+                'FusionConfigurableBOM.ui.palette_controller.scan_design_snapshot', return_value=object()
+            ) as snapshot,
+            patch(
+                'FusionConfigurableBOM.ui.palette_controller.scan_design_from_snapshot', return_value=([], {})
+            ) as flat,
+            patch(
+                'FusionConfigurableBOM.ui.palette_controller.scan_design_hierarchical_from_snapshot',
+                return_value=([], {}),
+            ),
+        ):
             controller.refresh(None, 'general')
             controller.refresh(None, 'structured')
             controller.refresh(None, 'general')
@@ -269,10 +320,18 @@ class PaletteControllerTests(unittest.TestCase):
         controller.components = {'row_1': shared, 'row_2': shared}
         controller.send = lambda palette, payload: None
 
-        controller.receive(None, json.dumps({
-            'action': 'save_cell', 'row_id': 'row_1', 'field_id': 'manufacturer',
-            'value': 'Acme', 'view_id': 'structured',
-        }))
+        controller.receive(
+            None,
+            json.dumps(
+                {
+                    'action': 'save_cell',
+                    'row_id': 'row_1',
+                    'field_id': 'manufacturer',
+                    'value': 'Acme',
+                    'view_id': 'structured',
+                }
+            ),
+        )
 
         self.assertEqual('Acme', controller.rows[0].custom_values['manufacturer'])
         self.assertEqual('Acme', controller.rows[1].custom_values['manufacturer'])
@@ -294,14 +353,24 @@ class PaletteControllerTests(unittest.TestCase):
             if view['view_id'] == 'general':
                 view['structure'] = 'hierarchical'
 
-        with patch('FusionConfigurableBOM.ui.palette_controller.scan_design_snapshot',
-                   return_value=object()), \
-             patch('FusionConfigurableBOM.ui.palette_controller.scan_design_hierarchical_from_snapshot',
-                   return_value=([], {})) as hierarchical, \
-             patch('FusionConfigurableBOM.ui.palette_controller.scan_design_from_snapshot') as flat:
-            controller.receive(None, json.dumps({
-                'action': 'save_config', 'config': raw_config, 'view_id': 'general',
-            }))
+        with (
+            patch('FusionConfigurableBOM.ui.palette_controller.scan_design_snapshot', return_value=object()),
+            patch(
+                'FusionConfigurableBOM.ui.palette_controller.scan_design_hierarchical_from_snapshot',
+                return_value=([], {}),
+            ) as hierarchical,
+            patch('FusionConfigurableBOM.ui.palette_controller.scan_design_from_snapshot') as flat,
+        ):
+            controller.receive(
+                None,
+                json.dumps(
+                    {
+                        'action': 'save_config',
+                        'config': raw_config,
+                        'view_id': 'general',
+                    }
+                ),
+            )
 
         hierarchical.assert_called_once()
         flat.assert_not_called()
@@ -319,13 +388,25 @@ class PaletteControllerTests(unittest.TestCase):
         controller._rows_structure = 'flat'
         controller.send = lambda palette, payload: None
 
-        with patch('FusionConfigurableBOM.ui.palette_controller.scan_design_hierarchical') as hierarchical, \
-             patch('FusionConfigurableBOM.ui.palette_controller.scan_design') as flat:
-            controller.receive(None, json.dumps({
-                'action': 'save_config', 'config': configuration_to_dict(default_configuration()),
-                'view_id': 'general',
-            }))
+        with (
+            patch('FusionConfigurableBOM.ui.palette_controller.scan_design_snapshot') as snapshot,
+            patch(
+                'FusionConfigurableBOM.ui.palette_controller.scan_design_hierarchical_from_snapshot'
+            ) as hierarchical,
+            patch('FusionConfigurableBOM.ui.palette_controller.scan_design_from_snapshot') as flat,
+        ):
+            controller.receive(
+                None,
+                json.dumps(
+                    {
+                        'action': 'save_config',
+                        'config': configuration_to_dict(default_configuration()),
+                        'view_id': 'general',
+                    }
+                ),
+            )
 
+        snapshot.assert_not_called()
         hierarchical.assert_not_called()
         flat.assert_not_called()
 
@@ -338,10 +419,15 @@ class PaletteControllerTests(unittest.TestCase):
         controller.send = lambda palette, payload: responses.append(payload)
 
         scanned_rows = [ConceptBomRow('row_1', 'Bracket', 2)]
-        with patch('FusionConfigurableBOM.ui.palette_controller.scan_design_snapshot',
-                   return_value=object()) as snapshot, \
-             patch('FusionConfigurableBOM.ui.palette_controller.scan_design_from_snapshot',
-                   return_value=(scanned_rows, {'row_1': object()})) as scan_design:
+        with (
+            patch(
+                'FusionConfigurableBOM.ui.palette_controller.scan_design_snapshot', return_value=object()
+            ) as snapshot,
+            patch(
+                'FusionConfigurableBOM.ui.palette_controller.scan_design_from_snapshot',
+                return_value=(scanned_rows, {'row_1': object()}),
+            ) as scan_design,
+        ):
             controller.receive(None, json.dumps({'action': 'refresh'}))
 
         scan_design.assert_called_once()
@@ -350,9 +436,10 @@ class PaletteControllerTests(unittest.TestCase):
         state = next(response for response in responses if response['type'] == 'state')
         self.assertEqual(1, len(state['table']['rows']))
         self.assertEqual('Bracket', state['table']['rows'][0]['values']['component_name'])
-        # A refresh must not report "Saved." — it only ever sends scanned state.
-        self.assertFalse(any(response['type'] == 'status' and response['message'] == 'Saved.'
-                             for response in responses))
+        # A refresh must not report "Updated." — it only ever sends scanned state.
+        self.assertFalse(
+            any(response['type'] == 'status' and response['message'] == 'Updated.' for response in responses)
+        )
 
     def test_save_as_creates_a_named_copy_with_pending_column_edits(self):
         root = object()
@@ -364,17 +451,34 @@ class PaletteControllerTests(unittest.TestCase):
         raw_config = {
             'schema_version': 1,
             'fields': [],
-            'views': [{
-                'view_id': 'general', 'name': 'General BOM',
-                'columns': [{'source_type': 'builtin', 'source_id': 'quantity',
-                             'header': 'Count', 'visible': True, 'width': 70}],
-            }],
+            'views': [
+                {
+                    'view_id': 'general',
+                    'name': 'General BOM',
+                    'columns': [
+                        {
+                            'source_type': 'builtin',
+                            'source_id': 'quantity',
+                            'header': 'Count',
+                            'visible': True,
+                            'width': 70,
+                        }
+                    ],
+                }
+            ],
         }
 
-        controller.receive(None, json.dumps({
-            'action': 'save_as_view', 'config': raw_config, 'view_id': 'general',
-            'name': 'Assembly summary',
-        }))
+        controller.receive(
+            None,
+            json.dumps(
+                {
+                    'action': 'save_as_view',
+                    'config': raw_config,
+                    'view_id': 'general',
+                    'name': 'Assembly summary',
+                }
+            ),
+        )
 
         views = controller.store.config.views
         self.assertEqual(['General BOM', 'Assembly summary'], [view.name for view in views])
@@ -382,8 +486,9 @@ class PaletteControllerTests(unittest.TestCase):
         self.assertNotEqual(views[0].view_id, views[1].view_id)
         state = next(response for response in responses if response['type'] == 'state')
         self.assertEqual(views[1].view_id, state['table']['view_id'])
-        self.assertTrue(any(response['type'] == 'status' and response['message'] == 'Saved.'
-                            for response in responses))
+        self.assertTrue(
+            any(response['type'] == 'status' and response['message'] == 'Updated.' for response in responses)
+        )
 
     def test_copy_table_uses_the_host_clipboard(self):
         app = type('App', (), {'activeProduct': None})()
@@ -392,9 +497,16 @@ class PaletteControllerTests(unittest.TestCase):
         controller.send = lambda palette, payload: responses.append(payload)
 
         with patch('FusionConfigurableBOM.ui.palette_controller.copy_text') as copy_text:
-            controller.receive(None, json.dumps({
-                'action': 'copy_table', 'tsv': 'Qty\tPart\r\n1\tBracket', 'row_count': 1,
-            }))
+            controller.receive(
+                None,
+                json.dumps(
+                    {
+                        'action': 'copy_table',
+                        'tsv': 'Qty\tPart\r\n1\tBracket',
+                        'row_count': 1,
+                    }
+                ),
+            )
 
         copy_text.assert_called_once_with('Qty\tPart\r\n1\tBracket')
         self.assertEqual({'type': 'copy_result', 'copied': True, 'row_count': 1}, responses[0])
@@ -417,11 +529,13 @@ class PaletteControllerTests(unittest.TestCase):
         controller.receive(None, json.dumps({'action': 'save_design'}))
 
         self.assertEqual(['Saved Configurable BOM changes.'], document.descriptions)
-        self.assertEqual([{'type': 'status', 'message': 'Design saved.'}], responses)
+        self.assertEqual([{'type': 'status', 'message': 'Design saved.', 'design_saved': True}], responses)
 
     def test_auto_save_persists_the_document_without_manual_action(self):
         saved = []
-        document = type('Document', (), {'save': lambda self, description: saved.append(description) or True})()
+        document = type(
+            'Document', (), {'save': lambda self, description: saved.append(description) or True}
+        )()
         app = type('App', (), {'activeDocument': document})()
         controller = PaletteController(app)
         responses = []
@@ -430,7 +544,7 @@ class PaletteControllerTests(unittest.TestCase):
         controller.receive(None, json.dumps({'action': 'save_design', 'auto': True}))
 
         self.assertEqual(['Saved Configurable BOM changes.'], saved)
-        self.assertEqual([{'type': 'status', 'message': 'Design saved.'}], responses)
+        self.assertEqual([{'type': 'status', 'message': 'Design saved.', 'design_saved': True}], responses)
 
     def test_auto_save_is_best_effort_when_the_document_cannot_be_saved(self):
         # An unsaved/untitled document returns False from save(); auto-saves must
@@ -483,17 +597,24 @@ class PaletteControllerTests(unittest.TestCase):
         controller.send = lambda palette, payload: None
         raw_config = configuration_to_dict(controller.store.config)
         for field in raw_config['fields']:
-            if field['field_id'] == 'manufacturer': field['field_id'] = 'maker'
+            if field['field_id'] == 'manufacturer':
+                field['field_id'] = 'maker'
         for view in raw_config['views']:
             for column in view['columns']:
                 if column['source_type'] == 'attribute' and column['source_id'] == 'manufacturer':
                     column['source_id'] = 'maker'
 
         with patch('FusionConfigurableBOM.ui.palette_controller.rename_value') as rename_value:
-            controller.receive(None, json.dumps({
-                'action': 'save_config', 'config': raw_config,
-                'renamed_fields': [{'old_id': 'manufacturer', 'new_id': 'maker'}],
-            }))
+            controller.receive(
+                None,
+                json.dumps(
+                    {
+                        'action': 'save_config',
+                        'config': raw_config,
+                        'renamed_fields': [{'old_id': 'manufacturer', 'new_id': 'maker'}],
+                    }
+                ),
+            )
 
         rename_value.assert_called_once_with(component, 'manufacturer', 'maker')
         self.assertEqual({'maker': 'Acme'}, controller.rows[0].custom_values)

@@ -150,7 +150,8 @@ class HierarchicalScannerTests(unittest.TestCase):
         nodes, _ = scan_design_hierarchical(self._nested_design(), [])
         self.assertEqual(
             [(node.component_name, node.level) for node in nodes],
-            [('Gearbox', 0), ('Screw', 1), ('Housing', 1), ('Bracket', 0)])
+            [('Gearbox', 0), ('Screw', 1), ('Housing', 1), ('Bracket', 0)],
+        )
 
     def test_structured_quantity_counts_identical_siblings(self):
         nodes = _by_name(scan_design_hierarchical(self._nested_design(), [])[0])
@@ -177,8 +178,10 @@ class HierarchicalScannerTests(unittest.TestCase):
 
         nodes, _ = scan_design_hierarchical(design, [])
 
-        self.assertEqual([('Top', 2), ('Middle', 2), ('Leaf', 2)],
-                         [(node.component_name, node.total_quantity) for node in nodes])
+        self.assertEqual(
+            [('Top', 2), ('Middle', 2), ('Leaf', 2)],
+            [(node.component_name, node.total_quantity) for node in nodes],
+        )
 
     def test_assembly_flag_and_parent_links(self):
         nodes, _ = scan_design_hierarchical(self._nested_design(), [])
@@ -206,10 +209,12 @@ class HierarchicalScannerTests(unittest.TestCase):
         screw = _Component('Screw', 'screw')
         assembly_a = _Component('Assembly A', 'assembly_a')
         assembly_b = _Component('Assembly B', 'assembly_b')
-        design = _Design([
-            _Occurrence(assembly_a, children=_instances(screw, 2)),
-            _Occurrence(assembly_b, children=_instances(screw, 3)),
-        ])
+        design = _Design(
+            [
+                _Occurrence(assembly_a, children=_instances(screw, 2)),
+                _Occurrence(assembly_b, children=_instances(screw, 3)),
+            ]
+        )
         value_store.write_value(design.rootComponent, screw, 'manufacturer', 'Acme')
 
         nodes, _ = scan_design_hierarchical(design, ['manufacturer'])
@@ -224,18 +229,22 @@ class HierarchicalScannerTests(unittest.TestCase):
         assembly = _Component('Fixture', 'fixture')
         screw = _Component('Screw', 'screw')
         washer = _Component('Washer', 'washer')
-        design = _Design([
-            _Occurrence(assembly, [_Occurrence(screw)]),
-            _Occurrence(assembly, [_Occurrence(washer)]),
-            _Occurrence(assembly, [_Occurrence(screw)]),
-        ])
+        design = _Design(
+            [
+                _Occurrence(assembly, [_Occurrence(screw)]),
+                _Occurrence(assembly, [_Occurrence(washer)]),
+                _Occurrence(assembly, [_Occurrence(screw)]),
+            ]
+        )
 
         nodes, _ = scan_design_hierarchical(design, [])
 
         fixtures = [node for node in nodes if node.component_name == 'Fixture']
         self.assertEqual(sorted(node.quantity for node in fixtures), [1, 2])
-        self.assertEqual([('Screw', 2), ('Washer', 1)],
-                         [(node.component_name, node.total_quantity) for node in nodes if not node.is_assembly])
+        self.assertEqual(
+            [('Screw', 2), ('Washer', 1)],
+            [(node.component_name, node.total_quantity) for node in nodes if not node.is_assembly],
+        )
 
     def test_all_occurrences_fallback_keeps_a_nonempty_tree_visible(self):
         component = _Component('Imported part', 'imported')

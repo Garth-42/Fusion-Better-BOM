@@ -1,24 +1,70 @@
 /* global adsk */
 
-const state = { config: null, table: null, sort: null, collapsed: new Set() };
+const state = {
+  config: null, table: null, sort: null, collapsed: new Set(),
+  // The format editor works on `draft`, a private copy of the configuration, so
+  // Cancel really discards and a rejected save leaves `config` untouched.
+  // `draftKeys` holds attribute keys the user has retyped (original -> new).
+  draft: null, draftKeys: {}, editViewId: null,
+};
 const $ = (id) => document.getElementById(id);
+const clone = (value) => JSON.parse(JSON.stringify(value));
 let copyFeedbackTimer;
 let autoSaveTimer;
+let cellTimer;
+let closeEditorOnState = false;
+// Cell edits waiting to be sent, keyed by row + field so only the latest value
+// of each cell goes to Fusion.
+const pendingCells = new Map();
 
-// Attribute and configuration edits live in Fusion attributes, which only reach
-// disk when the document is saved. Saving on every keystroke would be slow, so
-// mutating actions schedule a debounced save that coalesces a burst of edits
-// into a single persist. The manual Save design button stays for an immediate save.
+// Typing sends one message per pause rather than one per keystroke: each save
+// rewrites the design's stored value map, which is wasteful mid-word.
+const CELL_SAVE_DELAY_MS = 300;
+// BOM edits live in Fusion attributes, which only reach disk when the document
+// is saved -- and every save creates a new version of the design. So saving is
+// manual by default (the Save design button shows when there is something to
+// save); the Auto-save checkbox opts in to a debounced save after edits.
 const AUTO_SAVE_DELAY_MS = 900;
+const AUTO_SAVE_KEY = 'fusionBomAutoSave';
 const MUTATING_ACTIONS = new Set([
-  'save_cell', 'save_config', 'save_as_view', 'new_field',
-  'add_column', 'duplicate_view', 'delete_view',
+  'save_cell', 'save_config', 'save_as_view', 'new_field', 'add_column', 'delete_view',
 ]);
 
 function send(message) {
+  // Pending cell edits must reach Fusion before anything that redraws or saves.
+  if (message.action !== 'save_cell') flushCells();
   if (state.table && !message.view_id) message.view_id = state.table.view_id;
   adsk.fusionSendData('fusionBomMessage', JSON.stringify(message));
-  if (MUTATING_ACTIONS.has(message.action)) scheduleAutoSave();
+  if (MUTATING_ACTIONS.has(message.action)) {
+    setUnsaved(true);
+    if ($('autoSave').checked) scheduleAutoSave();
+  }
+}
+
+function queueCell(rowId, fieldId, value) {
+  // Keep the local copy current so sorting, collapsing or copying re-renders
+  // what the user typed rather than the last value Fusion sent.
+  const row = state.table.rows.find((item) => item.row_id === rowId);
+  if (row) row.values[fieldId] = value;
+  pendingCells.set(`${rowId}\n${fieldId}`, { action: 'save_cell', row_id: rowId, field_id: fieldId, value });
+  clearTimeout(cellTimer);
+  cellTimer = setTimeout(flushCells, CELL_SAVE_DELAY_MS);
+}
+
+function flushCells() {
+  clearTimeout(cellTimer);
+  const messages = [...pendingCells.values()];
+  pendingCells.clear();
+  messages.forEach(send);
+}
+
+function setUnsaved(unsaved) {
+  const button = $('saveDesign');
+  button.classList.toggle('unsaved', unsaved);
+  button.textContent = unsaved ? 'Save design •' : 'Save design';
+  button.title = unsaved
+    ? 'BOM changes are not yet saved with the Fusion design'
+    : 'Save the Fusion design, including BOM changes';
 }
 
 function scheduleAutoSave() {
@@ -33,6 +79,15 @@ function flushAutoSave() {
   send({ action: 'save_design', auto: true });
 }
 
+function readAutoSavePreference() {
+  // Storage can be unavailable in an embedded browser; default to off.
+  try { return localStorage.getItem(AUTO_SAVE_KEY) === 'on'; } catch (error) { return false; }
+}
+
+function writeAutoSavePreference(enabled) {
+  try { localStorage.setItem(AUTO_SAVE_KEY, enabled ? 'on' : 'off'); } catch (error) { /* not persisted */ }
+}
+
 // Fusion palettes deliver sendInfoToHTML calls through this documented bridge.
 window.fusionJavaScriptHandler = {
   handle(action, data) {
@@ -40,15 +95,25 @@ window.fusionJavaScriptHandler = {
 
     try {
       const message = JSON.parse(data);
-      if (message.type === 'error') return status(message.message, true);
-      if (message.type === 'status') return status(message.message);
+      if (message.type === 'error') {
+        closeEditorOnState = false;
+        return status(message.message, true);
+      }
+      if (message.type === 'status') {
+        if (message.design_saved) setUnsaved(false);
+        return status(message.message);
+      }
       if (message.type === 'copy_result') {
         showCopyFeedback(message.copied, message.row_count);
         return message.copied ? undefined : status(message.message, true);
       }
+      if (message.type === 'document_changed') return documentChanged();
       if (message.type === 'state') {
         state.config = message.config;
         state.table = message.table;
+        resetDraft();
+        if (closeEditorOnState && $('editor').open) $('editor').close();
+        closeEditorOnState = false;
         render();
       }
     } catch (error) {
@@ -57,9 +122,25 @@ window.fusionJavaScriptHandler = {
   },
 };
 
+// The user switched to another Fusion document. Everything on screen -- and any
+// edit not yet sent -- belongs to the previous design, so drop it and re-scan.
+function documentChanged() {
+  clearTimeout(cellTimer);
+  clearTimeout(autoSaveTimer);
+  pendingCells.clear();
+  state.collapsed.clear();
+  setUnsaved(false);
+  if ($('editor').open) $('editor').close();
+  status('Active design changed — scanning assembly…');
+  send({ action: 'refresh', force: true });
+}
+
 function status(text, error = false) {
   $('status').textContent = text;
   $('status').className = error ? 'error' : '';
+  // The modal editor covers the main status line, so mirror it inside.
+  $('editorStatus').textContent = text;
+  $('editorStatus').className = error ? 'error' : '';
 }
 
 function render() {
@@ -225,30 +306,37 @@ function copyTable() {
   send({ action: 'copy_table', tsv, row_count: state.table.rows.length });
 }
 
+function resetDraft() {
+  state.draft = state.config ? clone(state.config) : null;
+  state.draftKeys = {};
+}
+
 function currentView() {
-  return state.config.views.find((view) => view.view_id === $('editView').value) || state.config.views[0];
+  return state.draft.views.find((view) => view.view_id === state.editViewId) || state.draft.views[0];
 }
 
 function renderEditor() {
-  if (!state.config) return;
+  if (!state.draft) return;
   const view = currentView();
-  $('editView').innerHTML = state.config.views
+  state.editViewId = view.view_id;
+  $('editView').innerHTML = state.draft.views
     .map((item) => `<option value="${escape(item.view_id)}">${escape(item.name)}</option>`)
     .join('');
   $('editView').value = view.view_id;
   $('editStructure').value = view.structure || 'flat';
   $('editRollup').value = view.rollup_by || 'component';
   $('editRollup').disabled = (view.structure || 'flat') === 'hierarchical';
-  $('field').innerHTML = state.config.fields
+  $('field').innerHTML = state.draft.fields
     .map((field) => `<option value="${escape(field.field_id)}">${escape(field.default_label)}</option>`)
     .join('');
   $('columns').innerHTML = view.columns.map((column, index) => {
     const isAttribute = column.source_type === 'attribute';
+    const key = state.draftKeys[column.source_id] ?? column.source_id;
     return `
     <div class="column">
       <label class="column-header">Column header<input class="header" data-index="${index}" value="${escape(column.header)}"></label>
       ${isAttribute
-    ? `<label class="attribute-key">Attribute key<input class="field-id" data-original-id="${escape(column.source_id)}" value="${escape(column.source_id)}" aria-label="Attribute key for ${escape(column.header)}"></label>`
+    ? `<label class="attribute-key">Attribute key<input class="field-id" data-original-id="${escape(column.source_id)}" value="${escape(key)}" aria-label="Attribute key for ${escape(column.header)}"></label>`
     : `<span class="builtin-source">Built-in field: ${escape(column.source_id)}</span>`}
       <label><input class="visible" data-index="${index}" type="checkbox" ${column.visible ? 'checked' : ''}> Visible</label>
       <div class="column-actions" aria-label="Reorder column">
@@ -259,47 +347,58 @@ function renderEditor() {
   }).join('');
 }
 
-function collectEditorChanges() {
+// Copy what is typed in the editor into the draft. Called before anything that
+// redraws the editor (reordering, switching format) and before saving, so edits
+// are not lost and the form always matches the draft.
+function syncDraft() {
+  if (!state.draft) return;
   const view = currentView();
   view.structure = $('editStructure').value;
   view.rollup_by = $('editRollup').value;
-  document.querySelectorAll('.header').forEach((element) => {
-    view.columns[element.dataset.index].header = element.value;
+  document.querySelectorAll('#columns .header').forEach((element) => {
+    const column = view.columns[element.dataset.index];
+    if (column.header === element.value) return;
+    column.header = element.value;
+    if (column.source_type !== 'attribute') return;
+    // A custom column's header is the field's display name everywhere.
+    const field = state.draft.fields.find((item) => item.field_id === column.source_id);
+    if (field) field.default_label = element.value;
+    state.draft.views.forEach((item) => item.columns.forEach((other) => {
+      if (other.source_type === 'attribute' && other.source_id === column.source_id) other.header = element.value;
+    }));
   });
-  document.querySelectorAll('.visible').forEach((element) => {
+  document.querySelectorAll('#columns .visible').forEach((element) => {
     view.columns[element.dataset.index].visible = element.checked;
   });
-  const displayNames = new Map(view.columns
-    .filter((column) => column.source_type === 'attribute')
-    .map((column) => [column.source_id, column.header]));
-  state.config.fields.forEach((field) => {
-    const displayName = displayNames.get(field.field_id);
-    if (displayName === undefined) return;
-    field.default_label = displayName;
-    state.config.views.forEach((item) => item.columns.forEach((column) => {
-      if (column.source_type === 'attribute' && column.source_id === field.field_id) column.header = displayName;
+  document.querySelectorAll('#columns .field-id').forEach((element) => {
+    state.draftKeys[element.dataset.originalId] = element.value.trim();
+  });
+}
+
+// Build the configuration to send from the draft plus any retyped attribute
+// keys. The draft itself keeps the original keys, so if Fusion rejects the
+// save the editor is still consistent and the user can simply correct and retry.
+function collectEditorChanges() {
+  syncDraft();
+  const config = clone(state.draft);
+  const renamedFields = Object.entries(state.draftKeys)
+    .filter(([oldId, newId]) => newId !== oldId)
+    .map(([oldId, newId]) => ({ old_id: oldId, new_id: newId }));
+  renamedFields.forEach((rename) => {
+    config.fields.forEach((field) => {
+      if (field.field_id === rename.old_id) field.field_id = rename.new_id;
+    });
+    config.views.forEach((view) => view.columns.forEach((column) => {
+      if (column.source_type === 'attribute' && column.source_id === rename.old_id) column.source_id = rename.new_id;
     }));
   });
-  const renamedFields = [];
-  const fieldsByOriginalId = new Map(state.config.fields.map((field) => [field.field_id, field]));
-  document.querySelectorAll('.field-id').forEach((element) => {
-    const field = fieldsByOriginalId.get(element.dataset.originalId);
-    const fieldId = element.value.trim();
-    if (fieldId !== field.field_id) renamedFields.push({ old_id: field.field_id, new_id: fieldId });
-    field.field_id = fieldId;
-  });
-  if (renamedFields.length) {
-    state.config.views.forEach((item) => item.columns.forEach((column) => {
-      const rename = renamedFields.find((change) => change.old_id === column.source_id);
-      if (rename && column.source_type === 'attribute') column.source_id = rename.new_id;
-    }));
-  }
-  return renamedFields;
+  return { config, renamedFields };
 }
 
 function saveConfig() {
-  const renamedFields = collectEditorChanges();
-  send({ action: 'save_config', config: state.config, renamed_fields: renamedFields });
+  const { config, renamedFields } = collectEditorChanges();
+  closeEditorOnState = true;
+  send({ action: 'save_config', config, renamed_fields: renamedFields });
 }
 
 $('refresh').onclick = () => { status('Scanning assembly…'); send({ action: 'refresh', force: true }); };
@@ -313,23 +412,35 @@ $('thead').onclick = (event) => {
   render();
 };
 $('view').onchange = (event) => {
-  const view = state.config.views.find((item) => item.view_id === event.target.value);
-  // Different structures and flat roll-up modes need differently aggregated
-  // rows. The controller reuses a cached scan when this combination has already
-  // been visited, avoiding another occurrence-tree walk.
-  const structureChanged = (view.structure || 'flat') !== (state.table.structure || 'flat');
-  const rollupChanged = (view.structure || 'flat') === 'flat'
-    && (view.rollup_by || 'component') !== (state.table.rollup_by || 'component');
-  if (structureChanged || rollupChanged) {
-    status('Scanning assembly…');
-    return send({ action: 'refresh', view_id: view.view_id });
-  }
-  state.table.columns = view.columns.filter((column) => column.visible);
-  state.table.view_id = view.view_id;
-  render();
+  // Always ask Fusion for the table: each row only carries values for the
+  // columns of the format it was built for, so swapping columns locally would
+  // show stored values as blank. The controller builds every format from one
+  // cached snapshot, so this does not re-walk the assembly.
+  send({ action: 'refresh', view_id: event.target.value });
 };
-$('edit').onclick = () => $('editor').showModal();
-$('editView').onchange = renderEditor;
+$('autoSave').checked = readAutoSavePreference();
+$('autoSave').onchange = (event) => {
+  writeAutoSavePreference(event.target.checked);
+  if (event.target.checked && $('saveDesign').classList.contains('unsaved')) scheduleAutoSave();
+  else clearTimeout(autoSaveTimer);
+};
+$('edit').onclick = () => {
+  if (!state.config) return status('Click Refresh to scan the design before editing formats.', true);
+  flushCells();
+  resetDraft();
+  state.editViewId = state.table.view_id;
+  renderEditor();
+  $('editor').showModal();
+};
+// Cancel, the close button and Esc all end up here: discard unsaved edits.
+$('editor').addEventListener('close', () => { closeEditorOnState = false; resetDraft(); });
+$('editView').onchange = (event) => {
+  // syncDraft still targets the previous format (state.editViewId).
+  syncDraft();
+  state.editViewId = event.target.value;
+  renderEditor();
+};
+$('editStructure').onchange = (event) => { $('editRollup').disabled = event.target.value === 'hierarchical'; };
 $('saveConfig').onclick = saveConfig;
 $('saveAs').onclick = () => {
   const source = currentView();
@@ -337,17 +448,24 @@ $('saveAs').onclick = () => {
   if (name === null) return;
   const trimmedName = name.trim();
   if (!trimmedName) return status('Enter a name to save a new table format.', true);
-  const renamedFields = collectEditorChanges();
-  send({ action: 'save_as_view', config: state.config, view_id: source.view_id, name: trimmedName, renamed_fields: renamedFields });
+  const { config, renamedFields } = collectEditorChanges();
+  send({ action: 'save_as_view', config, view_id: source.view_id, name: trimmedName, renamed_fields: renamedFields });
 };
-$('delete').onclick = () => send({ action: 'delete_view', view_id: currentView().view_id });
+$('delete').onclick = () => {
+  const view = currentView();
+  if (!confirm(`Delete the table format "${view.name}"? This cannot be undone.`)) return;
+  send({ action: 'delete_view', view_id: view.view_id });
+};
 $('addColumn').onclick = () => send({ action: 'add_column', view_id: currentView().view_id, field_id: $('field').value });
 $('addField').onclick = () => {
   const label = prompt('Custom field name');
   if (!label) return;
-  const fieldId = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  let fieldId = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
   if (!fieldId) return status('Use at least one letter or number in the field name.', true);
-  send({ action: 'new_field', field_id: fieldId, label, view_id: currentView().view_id });
+  // Attribute keys must start with a letter and be at most 64 characters.
+  if (!/^[a-z]/.test(fieldId)) fieldId = `f_${fieldId}`;
+  fieldId = fieldId.slice(0, 64).replace(/_+$/, '');
+  send({ action: 'new_field', field_id: fieldId, label: label.trim(), view_id: currentView().view_id });
 };
 $('columns').onclick = (event) => {
   if (!event.target.dataset.move) return;
@@ -355,6 +473,7 @@ $('columns').onclick = (event) => {
   const columns = currentView().columns;
   const destination = index + direction;
   if (destination < 0 || destination >= columns.length) return;
+  syncDraft();
   [columns[index], columns[destination]] = [columns[destination], columns[index]];
   renderEditor();
 };
@@ -368,19 +487,20 @@ $('tbody').onclick = (event) => {
   else state.collapsed.add(rowId);
   render();
 };
-// `input` writes the value into the Fusion attribute while the user types so the
-// live table stays correct; the debounced auto-save (scheduled by `send`) then
-// persists it to the document a moment after typing stops.
+// `input` updates the local table immediately and sends the value to Fusion
+// after a short pause in typing (see queueCell).
 $('tbody').oninput = (event) => {
   if (!event.target.dataset.row) return;
-  send({ action: 'save_cell', row_id: event.target.dataset.row, field_id: event.target.dataset.field, value: event.target.value });
+  queueCell(event.target.dataset.row, event.target.dataset.field, event.target.value);
 };
-// Persist promptly when focus leaves the table entirely (clicking the model, a
-// toolbar button, or another panel — often just before closing Fusion). Moving
-// between cells stays coalesced by the debounce instead of saving per cell.
+// When focus leaves the table entirely (clicking the model, a toolbar button,
+// or another panel -- often just before closing Fusion) send pending edits at
+// once, and save promptly if Auto-save is on.
 $('tbody').onfocusout = (event) => {
   if (!event.target.dataset || !event.target.dataset.row) return;
   const goingTo = event.relatedTarget;
   if (goingTo && $('tbody').contains(goingTo)) return;
-  flushAutoSave();
+  flushCells();
+  if ($('autoSave').checked && $('saveDesign').classList.contains('unsaved')) flushAutoSave();
 };
+setUnsaved(false);

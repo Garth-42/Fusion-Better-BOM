@@ -1,4 +1,5 @@
 import ctypes
+import os
 import subprocess
 import sys
 
@@ -6,7 +7,11 @@ import sys
 def copy_text(text):
     """Copy text through the host OS rather than the restricted palette web view."""
     if sys.platform == 'darwin':
-        subprocess.run(['pbcopy'], input=text, text=True, check=True)
+        # pbcopy decodes its input using the locale. A GUI app such as Fusion is
+        # often launched without one, which would mangle non-ASCII text, so send
+        # UTF-8 bytes and say so explicitly.
+        env = {**os.environ, 'LANG': 'en_US.UTF-8', 'LC_CTYPE': 'UTF-8'}
+        subprocess.run(['pbcopy'], input=text.encode('utf-8'), env=env, check=True)
         return
     if sys.platform != 'win32':
         raise RuntimeError('Clipboard copying is only supported by Fusion on Windows and macOS.')

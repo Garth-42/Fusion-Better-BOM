@@ -2,6 +2,8 @@ from dataclasses import dataclass, field
 
 from ..domain.models import ConceptBomRow, HierarchicalBomNode
 from .attribute_store import read_values as read_component_values
+from .identity import component_key
+from .value_store import load_map
 from .value_store import read_values as read_root_values
 
 
@@ -18,20 +20,9 @@ def _items(collection):
 
 
 def _visible(occurrences):
-    return [occurrence for occurrence in _items(occurrences)
-            if not getattr(occurrence, 'isSuppressed', False)]
-
-
-def _component_property(component, name, default=None):
-    try:
-        return getattr(component, name, default)
-    except Exception:
-        return default
-
-
-def _material_name(component):
-    material = _component_property(component, 'material')
-    return _component_property(material, 'name') if material else None
+    return [
+        occurrence for occurrence in _items(occurrences) if not getattr(occurrence, 'isSuppressed', False)
+    ]
 
 
 def _component_property(component, name, default=None):
@@ -47,13 +38,10 @@ def _component_property(component, name, default=None):
     except Exception:
         return default
 
+
 def _material_name(component):
     material = _component_property(component, 'material')
     return _component_property(material, 'name') if material else None
-
-def _component_key(component):
-    token = _component_property(component, 'entityToken')
-    return ('entity_token', token) if token else ('object_id', id(component))
 
 
 def _has_bodies(component):
@@ -87,47 +75,63 @@ class BomSnapshot:
     all_nodes: list[tuple[ParsedOccurrence, ParsedOccurrence | None]]
 
 
-def _shared_values(root, component, field_ids):
-    values = read_component_values(component, field_ids)
-    values.update(read_root_values(root, component, field_ids))
-    return values
+def _top_level(occurrences):
+    # allOccurrences lists nested occurrences too; `parse` already recurses into
+    # children, so only start from the ones with no parent assembly. If none
+    # report a context (test doubles, odd imports) keep them all.
+    top = [
+        occurrence for occurrence in occurrences if _component_property(occurrence, 'assemblyContext') is None
+    ]
+    return top or occurrences
 
 
 def scan_design_snapshot(design, field_ids):
     """Read Fusion occurrence/component data once into a pure-Python snapshot.
 
     Format changes must only aggregate this snapshot; they must not invoke Fusion
-    collections or component properties again. The snapshot is intentionally
-    scoped to one explicit refresh and one configured field set.
+    collections or component properties again. The snapshot is scoped to one
+    configured field set; cell edits patch `ParsedComponent.custom_values` in
+    place so it stays current without another walk.
     """
     root = design.rootComponent
     components, all_nodes = {}, []
+    stored_values = load_map(root)  # Parsed once, not once per component.
 
     def parsed_component(component):
-        key = _component_key(component)
+        key = component_key(component)
         if key not in components:
+            values = read_component_values(component, field_ids)
+            values.update(read_root_values(root, component, field_ids, stored_values))
             components[key] = ParsedComponent(
-                component, key, _component_property(component, 'name', ''),
+                component,
+                key,
+                _component_property(component, 'name', ''),
                 _component_property(component, 'partNumber'),
-                _component_property(component, 'description'), _material_name(component),
+                _component_property(component, 'description'),
+                _material_name(component),
                 bool(_component_property(component, 'isReferencedComponent', False)),
-                _shared_values(root, component, field_ids))
+                values,
+            )
         return components[key]
 
     def parse(occurrence, parent=None):
         node = ParsedOccurrence(parsed_component(occurrence.component))
         all_nodes.append((node, parent))
-        node.children = [parse(child, node) for child in _visible(getattr(occurrence, 'childOccurrences', None))]
+        node.children = [
+            parse(child, node) for child in _visible(getattr(occurrence, 'childOccurrences', None))
+        ]
         return node
 
     root_occurrences = _visible(getattr(root, 'occurrences', None))
-    if root_occurrences:
-        roots = [parse(occurrence) for occurrence in root_occurrences]
-    else:
-        # Imported designs sometimes only expose allOccurrences. Their parent
-        # relationships are unavailable, but retaining every row is preferable
-        # to an empty BOM.
-        roots = [parse(occurrence) for occurrence in _visible(getattr(root, 'allOccurrences', None))]
+    if not root_occurrences:
+        # Imported designs sometimes only expose allOccurrences.
+        root_occurrences = _top_level(_visible(getattr(root, 'allOccurrences', None)))
+    roots = [parse(occurrence) for occurrence in root_occurrences]
+    if not roots and _has_bodies(root):
+        # A single-part design has no occurrences: the root itself is the part.
+        # It goes through parsed_component so its saved values are read back.
+        node = ParsedOccurrence(parsed_component(root))
+        roots, all_nodes = [node], [(node, None)]
     return BomSnapshot(root, roots, all_nodes)
 
 
@@ -145,30 +149,35 @@ def _rollup_key(node, parent, rollup_by):
 
 def scan_design_from_snapshot(snapshot, rollup_by='component'):
     """Build a flat table from a previously parsed snapshot without Fusion IO."""
+    # Every non-empty tree has leaves, so this is empty only for an empty design.
     candidates = [(node, parent) for node, parent in snapshot.all_nodes if not node.children]
-    if not candidates:
-        candidates = [(node, parent) for node, parent in snapshot.all_nodes if _has_bodies(node.component.component)]
-    if not candidates:
-        candidates = list(snapshot.all_nodes)
-    if not candidates and _has_bodies(snapshot.root):
-        root_component = ParsedComponent(snapshot.root, _component_key(snapshot.root),
-            _component_property(snapshot.root, 'name', ''), _component_property(snapshot.root, 'partNumber'),
-            _component_property(snapshot.root, 'description'), _material_name(snapshot.root),
-            bool(_component_property(snapshot.root, 'isReferencedComponent', False)), {})
-        candidates = [(ParsedOccurrence(root_component), None)]
 
     grouped = {}
     for node, parent in candidates:
         key = _rollup_key(node, parent, rollup_by)
-        entry = grouped.setdefault(key, {'node': node, 'parent': parent, 'quantity': 0})
+        entry = grouped.setdefault(key, {'node': node, 'parent': parent, 'quantity': 0, 'members': {}})
         entry['quantity'] += 1
+        # A part-number roll-up can merge several definitions into one row; keep
+        # them all so an edit to the row reaches every one of them.
+        entry['members'].setdefault(node.component.key, node.component)
     rows, components = [], {}
     for index, entry in enumerate(grouped.values(), 1):
         item, parent = entry['node'].component, entry['parent']
         row_id = f'row_{index}'
-        rows.append(ConceptBomRow(row_id, item.name, entry['quantity'], item.part_number,
-            item.description, item.material, item.linked, dict(item.custom_values),
-            parent.component.name if parent else None))
+        rows.append(
+            ConceptBomRow(
+                row_id,
+                item.name,
+                entry['quantity'],
+                item.part_number,
+                item.description,
+                item.material,
+                item.linked,
+                dict(item.custom_values),
+                parent.component.name if parent else None,
+                list(entry['members'].values()),
+            )
+        )
         components[row_id] = item.component
     return rows, components
 
@@ -176,8 +185,10 @@ def scan_design_from_snapshot(snapshot, rollup_by='component'):
 def _tree_signature(node, cache):
     node_id = id(node)
     if node_id not in cache:
-        cache[node_id] = (node.component.key,
-            tuple(sorted((_tree_signature(child, cache) for child in node.children), key=repr)))
+        cache[node_id] = (
+            node.component.key,
+            tuple(sorted((_tree_signature(child, cache) for child in node.children), key=repr)),
+        )
     return cache[node_id]
 
 
@@ -195,9 +206,23 @@ def scan_design_hierarchical_from_snapshot(snapshot):
             item, total = source.component, quantity * parent_rollup
             counter[0] += 1
             row_id = f'row_{counter[0]}'
-            nodes.append(HierarchicalBomNode(row_id, item.name, level, parent_id, quantity,
-                total, bool(source.children), item.part_number, item.description, item.material,
-                item.linked, dict(item.custom_values)))
+            nodes.append(
+                HierarchicalBomNode(
+                    row_id,
+                    item.name,
+                    level,
+                    parent_id,
+                    quantity,
+                    total,
+                    bool(source.children),
+                    item.part_number,
+                    item.description,
+                    item.material,
+                    item.linked,
+                    dict(item.custom_values),
+                    [item],
+                )
+            )
             components[row_id] = item.component
             if source.children:
                 walk(source.children, row_id, level + 1, total)

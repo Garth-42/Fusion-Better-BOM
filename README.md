@@ -62,9 +62,11 @@ The add-in uses its **own palette** and never modifies Fusion's native BOM UI.
    **Structured BOM** tree view. The dropdown *is* the flat-vs-hierarchical
    switch: each format is either flat or hierarchical, so picking a format
    chooses the structure — there is no separate toggle.
-5. Click any cell marked with a ✎ to edit it. Edits save to the Fusion design
-   automatically a moment after you stop typing; click **Save design** to save
-   immediately.
+5. Click any cell marked with a ✎ to edit it. Edits are kept with the Fusion design
+   once it is saved: click **Save design** (it shows a • while there are unsaved
+   BOM changes), or tick **Auto-save** to have the add-in save for you a moment
+   after you stop editing. Auto-save is off by default because every save
+   creates a new version of the design.
 6. Click **Edit formats** to set a format's **Structure** (flat or
    hierarchical) and its flat **Roll-up** (component, part number, or immediate
    subassembly), add fields, add/hide/reorder columns, rename headers, or
@@ -85,8 +87,11 @@ The add-in uses its **own palette** and never modifies Fusion's native BOM UI.
 
 Custom columns and cell values are stored as Fusion **component Attributes** on
 the active design's root component and reach disk when the design is saved. The
-add-in debounce-saves the document for you after edits and also offers a manual
-**Save design** button. Values entered on a part that is linked from another
+**Save design** button saves the document, and the optional **Auto-save**
+checkbox does so automatically after edits. Values are keyed by each
+component's persistent ID (`Component.id`); values saved by earlier builds under
+an entity token are still read and are moved to the ID key the next time they
+are edited. Values entered on a part that is linked from another
 file are read-only in the parent design.
 
 ## Project status

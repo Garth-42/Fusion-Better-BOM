@@ -33,6 +33,11 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .primary { color: var(--accent-text); background: var(--accent); border-color: var(--accent); }
 .primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 .danger { color: var(--danger); }
+.auto-save { display: flex; align-items: center; gap: 4px; color: var(--muted); white-space: nowrap; }
+.auto-save input { margin: 0; }
+#saveDesign.unsaved { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
+#editorStatus { min-height: 1.3em; margin: 10px 0 0; color: var(--muted); }
+#editorStatus.error { color: var(--danger); }
 button:disabled { cursor: not-allowed; opacity: .45; }
 button:disabled:hover { background: var(--surface); }
 #copy.copied { color: var(--accent-text); background: var(--success); border-color: var(--success); animation: copy-confirm .32s ease-out; }

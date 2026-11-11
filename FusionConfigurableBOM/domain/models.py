@@ -1,10 +1,12 @@
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from typing import Optional
+
 
 @dataclass(frozen=True)
 class CustomFieldDefinition:
     field_id: str
     default_label: str
+
 
 @dataclass(frozen=True)
 class ColumnDefinition:
@@ -13,6 +15,7 @@ class ColumnDefinition:
     header: str
     visible: bool = True
     width: Optional[int] = None
+
 
 @dataclass
 class BomTableFormat:
@@ -24,11 +27,13 @@ class BomTableFormat:
     # their immediate parent, so this setting only changes flat views.
     rollup_by: str = 'component'  # 'component', 'part_number', or 'subassembly'
 
+
 @dataclass
 class BomConfiguration:
     schema_version: int
     fields: list[CustomFieldDefinition] = field(default_factory=list)
     views: list[BomTableFormat] = field(default_factory=list)
+
 
 @dataclass
 class ConceptBomRow:
@@ -41,6 +46,10 @@ class ConceptBomRow:
     linked: bool = False
     custom_values: dict[str, str] = field(default_factory=dict)
     parent_assembly: Optional[str] = None
+    # Scanner bookkeeping, never sent to the UI: the parsed component definitions
+    # this row stands for (several when a part-number roll-up merges them).
+    members: list = field(default_factory=list, repr=False, compare=False)
+
 
 @dataclass
 class HierarchicalBomNode:
@@ -64,7 +73,21 @@ class HierarchicalBomNode:
     material: Optional[str] = None
     linked: bool = False
     custom_values: dict[str, str] = field(default_factory=dict)
+    members: list = field(default_factory=list, repr=False, compare=False)
+
 
 def configuration_to_dict(config):
-    return {'schema_version': config.schema_version, 'fields': [asdict(f) for f in config.fields],
-            'views': [{'view_id': v.view_id, 'name': v.name, 'structure': v.structure, 'rollup_by': v.rollup_by, 'columns': [asdict(c) for c in v.columns]} for v in config.views]}
+    return {
+        'schema_version': config.schema_version,
+        'fields': [asdict(f) for f in config.fields],
+        'views': [
+            {
+                'view_id': v.view_id,
+                'name': v.name,
+                'structure': v.structure,
+                'rollup_by': v.rollup_by,
+                'columns': [asdict(c) for c in v.columns],
+            }
+            for v in config.views
+        ],
+    }

@@ -34,3 +34,26 @@ Use an assembly with at least one sub-assembly that appears more than once, each
 - [ ] Edit a custom cell on a component that appears in more than one place; after Refresh, every node for that component shows the same value.
 - [ ] Switch back to General BOM and confirm the flat, sortable leaf table still works.
 - [ ] "Save as" from the Structured BOM format and confirm the copy is still hierarchical.
+
+## Checks added after the code review
+
+These behaviours depend on the live Fusion API and are not covered by the unit
+tests, so confirm them in Fusion:
+
+1. **Document switch.** Scan design A, switch to design B's tab: the palette
+   should re-scan and show B's rows on its own. If it does not (the
+   `documentActivated` handler did not fire), editing a cell must show "The
+   active design changed…" rather than saving.
+2. **Existing values survive the key change.** Open a design whose values were
+   entered with an earlier build: every value should still show. Edit one, save,
+   reopen: it should still show.
+3. **Save behaviour.** With **Auto-save** off, editing a cell must not create a
+   new design version; **Save design** shows a • until clicked. With it on, one
+   version is created shortly after typing stops.
+4. **Format editor dialogs.** Delete asks for confirmation; a rejected attribute
+   key shows its message inside the editor and a corrected retry succeeds.
+5. **Suppressed/hidden components.** Check whether suppressed or hidden
+   occurrences are counted. The scanner filters on `Occurrence.isSuppressed`,
+   which could not be confirmed against the API reference.
+6. **Non-ASCII copy on macOS.** Copy a table containing e.g. "Ø5 – M6" and paste
+   it into a spreadsheet.

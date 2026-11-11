@@ -18,7 +18,7 @@ decision to lift that gate.
   (count directly under its immediate parent) and a *rolled-up total* quantity
   (occurrences in the whole design reached through that path).
 - **Shared values.** Custom values stay keyed by component definition
-  (`entityToken`). The same part shows the same values everywhere it appears in
+  (`Component.id`, with `entityToken` as a legacy fallback). The same part shows the same values everywhere it appears in
   the tree. Per-location overrides remain a deferred roadmap item (assembly
   overrides), so no per-node value storage is introduced here.
 
@@ -109,7 +109,7 @@ flat scan data (no tree, blank Total Qty). The schema and storage are ready.
   the rendered one (flat leaves vs tree nodes are differently shaped), instead
   of only re-filtering columns.
 - `save_cell` propagates the edit to every cached row that resolves to the same
-  component (`_same_component` matches by entityToken, identity fallback), so all
+  component (matched by `component_key`: persistent ID, then token, then identity), so all
   nodes for one definition stay in sync; a flat scan matches exactly one row.
 - Tests: a hierarchical view routes to the tree scan; one cell edit updates every
   row sharing a component.
