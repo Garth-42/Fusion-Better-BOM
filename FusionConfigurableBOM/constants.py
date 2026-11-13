@@ -7,7 +7,7 @@ PALETTE_ID = 'fusion_configurable_bom_palette'
 # namespace. Changing it again would orphan saved data unless the old value is
 # added to the fallback chain the way LEGACY_NAMESPACE is (see
 # fusion/attribute_groups.py). It also matches the manifest "id".
-NAMESPACE = 'com.fusion_configurable_bom'
+NAMESPACE = 'fusion_configurable_bom'
 # The template placeholder used by earlier builds; still read, never written.
 LEGACY_NAMESPACE = 'com.company.fusion_configurable_bom'
 FIELD_ATTRIBUTE_GROUP = NAMESPACE + '.fields'
