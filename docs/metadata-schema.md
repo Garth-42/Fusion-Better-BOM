@@ -4,7 +4,7 @@
 
 Deliverable 1 uses two simple Attribute mechanisms.
 
-> **Namespace.** All attribute groups start with `com.garth42.fusion_configurable_bom`
+> **Namespace.** All attribute groups start with `com.fusion_configurable_bom`
 > (`NAMESPACE` in `constants.py`, matching the manifest `id`). Earlier builds used
 > the template placeholder `com.company.fusion_configurable_bom`. Data under the
 > old groups is still read; each write goes to the new group and removes the old
@@ -16,7 +16,7 @@ Deliverable 1 uses two simple Attribute mechanisms.
 Attribute group:
 
 ```text
-com.garth42.fusion_configurable_bom.fields
+com.fusion_configurable_bom.fields
 ```
 
 Each custom field has a stable internal `field_id`. The field ID is used as the Attribute name.
@@ -29,7 +29,7 @@ Attribute value: <string>
 Example:
 
 ```text
-Attribute group: com.garth42.fusion_configurable_bom.fields
+Attribute group: com.fusion_configurable_bom.fields
 Attribute name: manufacturer_part_number
 Attribute value: 3248100
 ```
@@ -43,7 +43,7 @@ Deliverable 1 supports string values only.
 Store field definitions and table formats on the root component.
 
 ```text
-Attribute group: com.garth42.fusion_configurable_bom
+Attribute group: com.fusion_configurable_bom
 Attribute name: configuration
 ```
 
