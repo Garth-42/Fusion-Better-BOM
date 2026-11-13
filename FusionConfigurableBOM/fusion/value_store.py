@@ -1,6 +1,7 @@
 import json
 
-from ..constants import VALUE_ATTRIBUTE_GROUP, VALUE_ATTRIBUTE_NAME
+from ..constants import LEGACY_VALUE_ATTRIBUTE_GROUP, VALUE_ATTRIBUTE_GROUP, VALUE_ATTRIBUTE_NAME
+from .attribute_groups import find, put
 from .identity import storage_keys
 
 # BOM cell values are stored in one JSON map on the *active design's* root
@@ -21,7 +22,7 @@ def load_map(root):
     attributes = _attributes(root)
     if attributes is None:
         return {}
-    attribute = attributes.itemByName(VALUE_ATTRIBUTE_GROUP, VALUE_ATTRIBUTE_NAME)
+    attribute = find(attributes, VALUE_ATTRIBUTE_GROUP, LEGACY_VALUE_ATTRIBUTE_GROUP, VALUE_ATTRIBUTE_NAME)
     if not attribute:
         return {}
     try:
@@ -36,12 +37,7 @@ def _store_map(root, data):
     if attributes is None:
         return
     value = json.dumps(data, separators=(',', ':'), sort_keys=True)
-    attribute = attributes.itemByName(VALUE_ATTRIBUTE_GROUP, VALUE_ATTRIBUTE_NAME)
-    if attribute:
-        # Updating an existing attribute marks the owning design as modified.
-        attribute.value = value
-    else:
-        attributes.add(VALUE_ATTRIBUTE_GROUP, VALUE_ATTRIBUTE_NAME, value)
+    put(attributes, VALUE_ATTRIBUTE_GROUP, LEGACY_VALUE_ATTRIBUTE_GROUP, VALUE_ATTRIBUTE_NAME, value)
 
 
 def _entry(data, component):

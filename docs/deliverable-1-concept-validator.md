@@ -78,13 +78,13 @@ Each custom field has a stable internal `field_id`. The visible column header is
 Recommended Attribute group:
 
 ```text
-com.company.fusion_configurable_bom.fields
+com.garth42.fusion_configurable_bom.fields
 ```
 
 For each component and custom field:
 
 ```text
-Attribute group: com.company.fusion_configurable_bom.fields
+Attribute group: com.garth42.fusion_configurable_bom.fields
 Attribute name: <field_id>
 Attribute value: <string value>
 ```
@@ -179,7 +179,7 @@ Store field definitions and design-specific table formats as one versioned JSON 
 Recommended Attribute:
 
 ```text
-Attribute group: com.company.fusion_configurable_bom
+Attribute group: com.garth42.fusion_configurable_bom
 Attribute name: configuration
 ```
 

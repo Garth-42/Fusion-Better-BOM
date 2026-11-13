@@ -2,7 +2,7 @@ import json
 import re
 import uuid
 
-from ..constants import CONFIG_ATTRIBUTE_GROUP, CONFIG_ATTRIBUTE_NAME
+from ..constants import CONFIG_ATTRIBUTE_GROUP, CONFIG_ATTRIBUTE_NAME, LEGACY_CONFIG_ATTRIBUTE_GROUP
 from ..domain.models import (
     BomConfiguration,
     BomTableFormat,
@@ -10,6 +10,7 @@ from ..domain.models import (
     CustomFieldDefinition,
     configuration_to_dict,
 )
+from ..fusion.attribute_groups import find, put
 
 SCHEMA_VERSION = 3
 STRUCTURES = ('flat', 'hierarchical')
@@ -234,14 +235,17 @@ def new_id(prefix):
 
 class FusionConfigurationStore:
     def load(self, root):
-        attribute = root.attributes.itemByName(CONFIG_ATTRIBUTE_GROUP, CONFIG_ATTRIBUTE_NAME)
+        attribute = find(
+            root.attributes, CONFIG_ATTRIBUTE_GROUP, LEGACY_CONFIG_ATTRIBUTE_GROUP, CONFIG_ATTRIBUTE_NAME
+        )
         config = default_configuration() if not attribute else loads(attribute.value)
         return _ensure_default_views(config)
 
     def save(self, root, config):
-        value = dumps(config)
-        attribute = root.attributes.itemByName(CONFIG_ATTRIBUTE_GROUP, CONFIG_ATTRIBUTE_NAME)
-        if attribute:
-            attribute.value = value
-        else:
-            root.attributes.add(CONFIG_ATTRIBUTE_GROUP, CONFIG_ATTRIBUTE_NAME, value)
+        put(
+            root.attributes,
+            CONFIG_ATTRIBUTE_GROUP,
+            LEGACY_CONFIG_ATTRIBUTE_GROUP,
+            CONFIG_ATTRIBUTE_NAME,
+            dumps(config),
+        )
